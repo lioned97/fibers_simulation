@@ -1,6 +1,6 @@
 """
 paper_figures.py -- static publication figures for the SM / MM / MCF NV-diamond
-fiber-probe comparison. Run `py paper_figures.py`; figures land in ./figures
+fiber-probe comparison. Run `python paper_figures.py`; figures land in ./figures
 (PNG 300 dpi + vector PDF). No UI, no CLI args: edit the constants block.
 
 Model (shared Monte-Carlo ray tracer in physics.py, same as the app):
@@ -26,13 +26,13 @@ Model (shared Monte-Carlo ray tracer in physics.py, same as the app):
     and exactly reweighted by the true density / proposal pdf, so population
     totals are unbiased and every gap keeps hundreds of effective samples.
     Emission anisotropy: 4-axis NV dipole average.
-  * The MCF's lensed cores accept only ~0.7deg of angle, so those configs get
-    a much larger shared ray set (see CONFIGS); tracer calls are chunked over
-    emitters to cap memory.
-  * Efficiencies are "collected into the fiber" (diamond-exit Fresnel +
-    coupling); detected-rate/power panels additionally apply the fiber
-    entrance Fresnel. No filter/QE/attenuation chain -- these figures
-    characterize the probe, not a detector.
+  * Rays use a fixed, equal-solid-angle quadrature over the diamond escape
+    cone, rather than wasting samples over the TIR hemisphere.  Tracer calls
+    are chunked over emitters to keep the peak working set bounded.
+  * Every reported efficiency is power coupled into the fiber/lens: diamond
+    exit Fresnel, mode/geometric coupling, and the air-to-fiber/lens entrance
+    Fresnel are included. No filter, detector QE, connector, or propagation
+    loss is included -- these figures characterize the probe, not a detector.
   * Distance and resolution sweeps run at a representative 700 nm; the full
     spectral dependence is figure 2. Fixed seeds; fully reproducible.
 """
@@ -47,7 +47,7 @@ import matplotlib.pyplot as plt
 from physics import (
     diamond_sellmeier, nv_emission_spectrum,
     GEOMETRIC_MODEL, MODE_OVERLAP_MODEL,
-    get_collection_limit_radius, sample_ray_directions, run_ray_tracing,
+    get_collection_limit_radius, run_ray_tracing,
 )
 
 
@@ -85,8 +85,10 @@ E_PHOT_RED = 6.62607015e-34 * 2.99792458e8 / (LAM_RED * 1e-9)   # J
 # ensemble & Monte Carlo
 PPM        = 3.0
 RHO        = PPM * 1.76e5            # NV/um^3
-N_EMIT     = 1000                    # importance-sampled emitters
-RAY_BUDGET = 6_000_000               # max emitters*rays per tracer call (memory cap)
+N_EMIT     = 600                     # importance-sampled emitters
+# The tracer keeps several (n_emitters, n_rays) arrays plus a 3-vector array.
+# 0.75 M ray pairs gives a reproducible workstation-safe peak memory use.
+RAY_BUDGET = 750_000                 # max emitter-ray pairs per tracer call
 
 # MCF as-built (Shukhin et al., OMN 2024 + lens-design spreadsheet)
 PITCH, DECENTER = 35.0, 18.0
@@ -119,28 +121,28 @@ def mcf_fibers(g, reaim):
                      'd_clad': PITCH * 1.3, 'na': 0.15, 'boresight': b, 'w0': W0_LENS})
     return fibs
 
-# n1 / nen: shared ray-set sizes for the single-NV and ensemble runs. The MCF's
-# ~0.7deg angular acceptance keeps only ~1e-4 of hemisphere rays, so it needs
-# far more of them for the same Monte-Carlo error.
+# n1 / nen are equal-solid-angle escape-cone quadrature counts for the single
+# NV and ensemble calculations.  They are deliberately shared by all probe
+# types so differences are optical, not sampling artifacts.
 CONFIGS = [
     dict(name="SM",            exc="SM",  model=MODE_OVERLAP_MODEL,
          fibers=lambda g: [{'x': 0.0, 'y': 0.0, 'z': GAPS[-1], 'd_core': 4.0,
                             'd_clad': 125.0, 'na': 0.12}],
-         na=0.12, tf=t_face(1.46), n1=60_000, nen=12_000,
+         na=0.12, tf=t_face(1.46), n1=65_536, nen=16_384,
          color="#2a78d6", ls="-",  marker="o"),
     dict(name="MM",            exc="MM",  model=GEOMETRIC_MODEL,
          fibers=lambda g: [{'x': 0.0, 'y': 0.0, 'z': GAPS[-1], 'd_core': 50.0,
                             'd_clad': 125.0, 'na': 0.22}],
-         na=0.22, tf=t_face(1.46), n1=60_000, nen=12_000,
-         color="#1baf7a", ls="-",  marker="s")
-    # dict(name="MCF as-built",  exc="MCF", model=MODE_OVERLAP_MODEL,
-    #      fibers=lambda g: mcf_fibers(g, reaim=False),
-    #      na=0.15, tf=t_face(1.51), n1=6_000_000, nen=48_000,
-    #      color="#eda100", ls="-",  marker="^"),
-    # dict(name="MCF re-aimed",  exc="MCF", model=MODE_OVERLAP_MODEL,
-    #      fibers=lambda g: mcf_fibers(g, reaim=True),
-    #      na=0.15, tf=t_face(1.51), n1=6_000_000, nen=48_000,
-    #      color="#eda100", ls="--", marker="v"),
+         na=0.22, tf=t_face(1.46), n1=65_536, nen=16_384,
+         color="#1baf7a", ls="-",  marker="s"),
+    dict(name="MCF fixed aim", exc="MCF", model=MODE_OVERLAP_MODEL,
+           fibers=lambda g: mcf_fibers(g, reaim=False),
+           na=0.15, tf=t_face(1.51), n1=65_536, nen=16_384,
+           color="#d78500", ls="-",  marker="^"),
+    dict(name="MCF re-aimed",    exc="MCF", model=MODE_OVERLAP_MODEL,
+         fibers=lambda g: mcf_fibers(g, reaim=True),
+         na=0.15, tf=t_face(1.51), n1=65_536, nen=16_384,
+         color="#d78500", ls="--", marker="v"),
 ]
 
 # ============================ excitation ================================
@@ -153,7 +155,12 @@ def exc_width(profile, d, g):
     if profile == "SM":
         w0, th_a = 2.0, np.arcsin(0.12)
     else:                                    # MCF central core, collimated
-        w0, th_a = W0_LENS, (LAM_GREEN * 1e-3) / (np.pi * W0_LENS)
+        # Gaussian propagation: z_R = pi*n*w0^2/lambda.  The central core is
+        # collimated by design, so only this diffraction broadening is used.
+        w0 = W0_LENS
+        z_eff = g + d / N_DIA_GREEN
+        return w0 * np.sqrt(1.0 + (LAM_GREEN * 1e-3 * z_eff
+                                    / (np.pi * w0 * w0)) ** 2)
     th_d = np.arcsin(np.sin(th_a) / N_DIA_GREEN)
     return np.sqrt(w0 ** 2 + (g * np.tan(th_a) + d * np.tan(th_d)) ** 2)
 
@@ -168,6 +175,42 @@ def exc_rate(profile, x, y, z, g):
         I = 2.0 * P_GREEN_MW * T_GREEN_IN / (np.pi * w * w) * np.exp(-2.0 * r2 / (w * w))
     s = I / I_SAT
     return R_SAT * s / (1.0 + s), float(np.max(s))
+
+
+def escape_cone_quadrature(num_rays, n_dia, seed=42):
+    """Equal-solid-angle, fixed-seed quadrature over the transmitting cone.
+
+    ``run_ray_tracing`` normally expects directions drawn uniformly over the
+    upper hemisphere and therefore applies its conventional 1/2 factor.  Here
+    directions are instead restricted to the diamond-to-air escape cone; each
+    dipole weight gets the importance factor ``1-cos(theta_c)`` so the same
+    estimator remains exactly normalized to emission into 4pi.  A scrambled
+    grid avoids the severe rare-event noise of uniform-hemisphere Monte Carlo
+    for the MCF's diffraction-limited angular acceptance.
+    """
+    n_theta = max(1, int(np.floor(np.sqrt(num_rays))))
+    n_phi = int(np.ceil(num_rays / n_theta))
+    rng = np.random.default_rng(seed)
+    u_shift, p_shift = rng.random(2)
+    # Uniform in cos(theta) gives equal solid angle.  Keep every node safely
+    # inside the critical angle so numerical roundoff cannot create TIR rays.
+    cos_c = np.sqrt(1.0 - (N_MED / n_dia) ** 2)
+    u = ((np.arange(n_theta) + 0.5 + u_shift) % n_theta) / n_theta
+    p = ((np.arange(n_phi) + 0.5 + p_shift) % n_phi) / n_phi
+    uu, pp = np.meshgrid(u, p, indexing="ij")
+    cos_theta = 1.0 - uu.ravel() * (1.0 - cos_c)
+    phi = 2.0 * np.pi * pp.ravel()
+    sin_theta = np.sqrt(np.maximum(0.0, 1.0 - cos_theta * cos_theta))
+    v0 = np.column_stack((sin_theta * np.cos(phi), sin_theta * np.sin(phi), cos_theta))
+
+    # Four-axis NV average: two orthogonal dipoles per axis, normalized to
+    # unit 4pi-average emission.  This is also the orientation average used
+    # for the single-NV panel, where the individual NV orientation is unknown.
+    axes = np.array([[1.0, 1.0, 1.0], [1.0, -1.0, -1.0],
+                     [-1.0, 1.0, -1.0], [-1.0, -1.0, 1.0]]) / np.sqrt(3.0)
+    dipole_weight = 0.75 * (1.0 + np.mean((v0 @ axes.T) ** 2, axis=1))
+    weights = dipole_weight * (1.0 - cos_c)
+    return v0[:num_rays], weights[:num_rays]
 
 # ===================== ensemble emitter sampling ========================
 def sample_ensemble(cfg, n, rng):
@@ -227,32 +270,35 @@ def run_sweeps():
 
     for cfg in CONFIGS:
         print(f"  sweeping {cfg['name']} ...", flush=True)
-        V0_1, W0_1 = sample_ray_directions(cfg['n1'], "NV Symmetry Axis", "Ensemble (4-axis average)")
-        V0_e, W0_e = sample_ray_directions(cfg['nen'], "NV Symmetry Axis", "Ensemble (4-axis average)")
+        V0_1, W0_1 = escape_cone_quadrature(cfg['n1'], N_DIA_RED, seed=17)
+        V0_e, W0_e = escape_cone_quadrature(cfg['nen'], N_DIA_RED, seed=23)
         em, dens = sample_ensemble(cfg, N_EMIT, np.random.default_rng(42))
         r_em = np.hypot(em[:, 0], em[:, 1])
         order = np.argsort(r_em)
 
         eta1 = np.zeros_like(GAPS); rate1 = np.zeros_like(GAPS)
-        etaE = np.zeros_like(GAPS); powE = np.zeros_like(GAPS); d50 = np.zeros_like(GAPS)
+        etaE = np.zeros_like(GAPS); powE = np.zeros_like(GAPS); a50 = np.zeros_like(GAPS)
         for k, g in enumerate(GAPS):
             fibs = cfg['fibers'](g)
-            eta1[k] = eta_per_emitter(single, V0_1, W0_1, fibs, g, cfg['model'])[0]
+            eta1[k] = cfg['tf'] * eta_per_emitter(single, V0_1, W0_1, fibs, g, cfg['model'])[0]
             R1, s1 = exc_rate(cfg['exc'], 0.0, 0.0, -NV_DEPTH, g)
-            rate1[k] = R1 * eta1[k] * cfg['tf']
+            rate1[k] = R1 * eta1[k]
 
             eta_i = eta_per_emitter(em, V0_e, W0_e, fibs, g, cfg['model'])
             Ri, sE = exc_rate(cfg['exc'], em[:, 0], em[:, 1], em[:, 2], g)
             u = Ri * eta_i * dens                     # signal carried per sample
-            etaE[k] = u.sum() / (Ri * dens).sum()
+            etaE[k] = cfg['tf'] * u.sum() / (Ri * dens).sum()
             powE[k] = u.mean() * cfg['tf'] * E_PHOT_RED * 1e9     # nW
             cu = np.cumsum(u[order])
-            d50[k] = (2.0 * r_em[order][np.searchsorted(cu, 0.5 * cu[-1])]
-                      if cu[-1] > 0 else np.nan)
+            # A50 is the on-axis circular area on the NV layer containing
+            # half the excitation x collection weighted ensemble signal.
+            # This definition remains meaningful for the MCF's six lobes.
+            r50 = r_em[order][np.searchsorted(cu, 0.5 * cu[-1])] if cu[-1] > 0 else np.nan
+            a50[k] = np.pi * r50 * r50
             s_max_seen = max(s_max_seen, s1, sE)
 
         out[cfg['name']] = dict(cfg=cfg, eta1=eta1, rate1=rate1,
-                                etaE=etaE, powE=powE, d50=d50,
+                                etaE=etaE, powE=powE, a50=a50,
                                 g_opt=float(GAPS[np.argmax(eta1)]))
     return out, s_max_seen
 
@@ -262,10 +308,13 @@ def run_spectra(results):
     spectra = {}
     for name, r in results.items():
         cfg, g = r['cfg'], r['g_opt']
-        V0, W0 = sample_ray_directions(cfg['n1'], "NV Symmetry Axis", "Ensemble (4-axis average)")
+        # Cover the largest escape cone in the spectrum; the tracer then
+        # applies wavelength-specific Snell, Fresnel, and TIR physics.
+        n_min = min(float(diamond_sellmeier(lam / 1000.0)) for lam in LAM_SPECTRUM)
+        V0, W0 = escape_cone_quadrature(cfg['n1'], n_min, seed=31)
         spectra[name] = np.array([
-            eta_per_emitter(single, V0, W0, cfg['fibers'](g), g, cfg['model'],
-                            lam=lam, n_dia=float(diamond_sellmeier(lam / 1000.0)))[0]
+            cfg['tf'] * eta_per_emitter(single, V0, W0, cfg['fibers'](g), g, cfg['model'],
+                                         lam=lam, n_dia=float(diamond_sellmeier(lam / 1000.0)))[0]
             for lam in LAM_SPECTRUM])
     return spectra
 
@@ -292,21 +341,21 @@ def save(fig, stem):
 
 def fig1(results):
     fig, axs = plt.subplots(2, 2, figsize=(7.2, 5.8), sharex=True)
-    panels = [("eta1",  "Collection efficiency $\\eta$ (%)",    100.0, "(a) single NV"),
-              ("rate1", "Detected rate (photons/s)",            1.0,   "(b) single NV, 10 mW exc."),
-              ("etaE",  "Excitation-weighted $\\bar\\eta$ (%)", 100.0, "(c) ensemble, 3 ppm"),
-              ("powE",  "Collected power (nW)",                 1.0,   "(d) ensemble, 10 mW exc.")]
+    panels = [("eta1",  "Into-fiber efficiency $\\eta$ (%)",         100.0, "(a) single NV"),
+              ("rate1", "Collected rate (kcps)",                       1e-3,  "(b) single NV, 10 mW excitation"),
+              ("etaE",  "Excitation-weighted $\\bar\\eta$ (%)",      100.0, "(c) 3D ensemble, 3 ppm"),
+              ("powE",  "Collected optical power (nW)",               1.0,   "(d) 3D ensemble, 10 mW excitation")]
     for ax, (key, ylab, scale, title) in zip(axs.ravel(), panels):
         for r in results.values():
             ax.plot(GAPS, np.asarray(r[key]) * scale, **style(r['cfg']))
         ax.set_yscale("log")
         ax.set_ylabel(ylab)
         ax.set_title(title, fontsize=9.5, loc="left", color=INK2)
-    for ax in axs[1]:
-        ax.set_xlabel("Fiber–diamond gap $g$ (µm)")
     handles, labels = axs[0, 0].get_legend_handles_labels()
     fig.legend(handles, labels, ncol=4, loc="upper center",
                bbox_to_anchor=(0.5, 1.02), fontsize=9)
+    for ax in axs[1]:
+        ax.set_xlabel("Fiber-diamond gap $g$ ($\\mu$m)")
     fig.tight_layout(rect=(0, 0, 1, 0.96))
     save(fig, "fig1_efficiency_vs_gap")
 
@@ -317,11 +366,11 @@ def fig2(results, spectra):
     for name, eta in spectra.items():
         cfg = results[name]['cfg']
         st = style(cfg)
-        st['label'] = f"{name} (g = {results[name]['g_opt']:.0f} µm)"
         st['markevery'] = 1
+        st['label'] = f"{name} (g = {results[name]['g_opt']:.0f} $\\mu$m)"
         ax.plot(LAM_SPECTRUM, eta * 100.0, **st)
     ax.set_yscale("log")
-    ax.set_ylabel("Collection efficiency $\\eta(\\lambda)$ (%)")
+    ax.set_ylabel("Into-fiber efficiency $\\eta(\\lambda)$ (%)")
     ax.legend(fontsize=8, loc="center right")
 
     S = nv_emission_spectrum(LAM_SPECTRUM)
@@ -334,10 +383,10 @@ def fig2(results, spectra):
 def fig3(results):
     fig, ax = plt.subplots(figsize=(5.2, 3.6))
     for r in results.values():
-        ax.plot(GAPS, r['d50'], **style(r['cfg']))
-    ax.set_xlabel("Fiber–diamond gap $g$ (µm)")
-    ax.set_ylabel("Collection-area diameter $d_{50}$ (µm)")
+        ax.plot(GAPS, r['a50'], **style(r['cfg']))
     ax.set_ylim(bottom=0)
+    ax.set_xlabel("Fiber-diamond gap $g$ ($\\mu$m)")
+    ax.set_ylabel("50%-signal collection area $A_{50}$ ($\\mu$m$^2$)")
     ax.legend(fontsize=8.5)
     save(fig, "fig3_resolution_vs_gap")
 
@@ -356,13 +405,14 @@ if __name__ == "__main__":
     print(f"max saturation parameter s = I/I_sat encountered: {s_max:.2e}"
           f"  ->  {'saturation matters' if s_max > 0.1 else 'deeply linear regime'}")
     hdr = (f"{'probe':>14} | {'g* (um)':>7} | {'eta1(g*) %':>10} | "
-           f"{'rate1 (ph/s)':>12} | {'P_ens (nW)':>10} | {'d50(g*) um':>10}")
+           f"{'rate1 (kcps)':>12} | {'P_ens (nW)':>10} | {'A50(g*) um2':>12}")
     print("\n" + hdr + "\n" + "-" * len(hdr))
     for name, r in results.items():
         k = int(np.argmax(r['eta1']))
         print(f"{name:>14} | {r['g_opt']:7.0f} | {r['eta1'][k]*100:10.4f} | "
-              f"{r['rate1'][k]:12.3f} | {r['powE'][k]:10.3f} | {r['d50'][k]:10.1f}")
-    print("\nNotes: MCF 'as-built' beams cross ~300 um (air) from the lens plane, so its"
-          "\noptimum lies beyond the 0-200 um window by design; the re-aimed curve shows"
-          "\nthe idealized envelope. Single-NV rates are sub-cps at these gap/depth"
-          "\ncombinations -- ensemble operation (panels c,d) is the practical mode.")
+              f"{r['rate1'][k]*1e-3:12.5f} | {r['powE'][k]:10.3f} | {r['a50'][k]:12.1f}")
+    print("\nNotes: fixed-aim MCF boresights preserve the paper design's ~300 um air-side"
+          "\nconvergence; re-aimed MCF recalculates the side-core boresights at every gap."
+          "\nA50 is an on-axis circular area on the NV layer containing 50% of the"
+          "\nexcitation x collection weighted ensemble signal. Single-NV rates are reported"
+          "\nin kcps; ensemble operation is the practical mode for this deep NV layer.")
