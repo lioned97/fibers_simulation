@@ -11,8 +11,10 @@ Model (shared Monte-Carlo ray tracer in physics.py, same as the app):
   * Collection: Snell + Fresnel + TIR at the diamond surface, then per-fiber
     coupling -- SM: Gaussian LP01 mode overlap; MM: geometric core+NA;
     MCF: 6 side cores, Gaussian aperture w0 = pitch/2, tilted boresights.
-    MCF "as-built": fabricated 18 um lens decenter => beams cross 300 um from
-    the lens plane (Shukhin et al., OMN 2024), fixed while the diamond moves.
+    MCF "as-built": the six physical side cores are 35 um off-axis and their
+    red microlens pupils are decentered inward to 16.8434 um.  Their fixed
+    acceptance angle is the 650 nm design from microlens.xlsx: 141.185 um of
+    free air followed by a 30 um target depth (Shukhin et al., OMN 2024).
     MCF "re-aimed": boresights recomputed per gap to hit the NV-layer centre
     (exact Snell ray solve) -- an idealized redesign envelope.
   * Excitation: 10 mW of 532 nm out of the delivery aperture (SM/MM: same
@@ -90,14 +92,33 @@ N_EMIT     = 600                     # importance-sampled emitters
 # 0.75 M ray pairs gives a reproducible workstation-safe peak memory use.
 RAY_BUDGET = 750_000                 # max emitter-ray pairs per tracer call
 
-# MCF as-built (Shukhin et al., OMN 2024 + lens-design spreadsheet)
-PITCH, DECENTER = 35.0, 18.0
-LENS_R  = PITCH - DECENTER           # side-lens centre radius, 17 um
-W0_LENS = PITCH / 2.0                # lens aperture waist
-L_CROSS = 300.0                      # air-side beam-crossing distance from lens plane
+# MCF as-built: Shukhin et al. (OMN 2024), refined with microlens.xlsx,
+# orange/650-nm row.  The spreadsheet explicitly gives x=16.8434 um rather
+# than the rounded 18 um decenter quoted in the paper.  The lens is represented
+# as its measured/design effective pupil--the unpublished sag is not invented.
+PITCH = 35.0                          # physical side-core radius (um)
+LENS_R = 16.8434                      # side-lens pupil radius (um)
+W0_LENS = PITCH / 2.0                 # pupil-filling Gaussian 1/e^2 radius
+MCF_RED_FREE_AIR = 141.185            # spreadsheet, 650 nm red design (um)
+MCF_TARGET_DEPTH = 30.0               # spreadsheet, target below diamond face (um)
+MCF_RED_LENS_HEIGHT = 158.815         # spreadsheet, side-lens IP-S thickness (um)
+MCF_GREEN_LENS_HEIGHT = 194.041       # spreadsheet, central-lens IP-S thickness (um)
+MCF_DESIGN_N_DIA = 2.4093             # spreadsheet, diamond index at 650 nm
 
 def t_face(n_guide):                 # fiber entrance Fresnel (red, normal incidence)
     return 1.0 - ((n_guide - N_MED) / (n_guide + N_MED)) ** 2
+
+
+def mcf_fixed_air_angle():
+    """Air-side chief-ray angle of the spreadsheet's fixed red MCF design."""
+    f = lambda t: (MCF_TARGET_DEPTH * np.tan(t)
+                   + MCF_RED_FREE_AIR * np.tan(np.arcsin(MCF_DESIGN_N_DIA * np.sin(t)))
+                   - LENS_R)
+    theta_d = bisect(f, 1e-9, np.arcsin(1.0 / MCF_DESIGN_N_DIA) - 1e-6)
+    return np.arcsin(MCF_DESIGN_N_DIA * np.sin(theta_d))
+
+
+MCF_FIXED_AIR_ANGLE = mcf_fixed_air_angle()
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "figures")
 
@@ -113,11 +134,10 @@ def mcf_fibers(g, reaim):
                            + g * np.tan(np.arcsin(N_DIA_RED * np.sin(t))) - LENS_R)
             th_d = bisect(f, 1e-9, np.arcsin(1.0 / N_DIA_RED) - 1e-6)
             th_a = np.arcsin(N_DIA_RED * np.sin(th_d))
-            b = np.array([np.cos(a) * np.sin(th_a), np.sin(a) * np.sin(th_a), np.cos(th_a)])
         else:
-            b = np.array([fx, fy, L_CROSS])
-            b = b / np.linalg.norm(b)
-        fibs.append({'x': fx, 'y': fy, 'z': GAPS[-1], 'd_core': PITCH,
+            th_a = MCF_FIXED_AIR_ANGLE
+        b = np.array([np.cos(a) * np.sin(th_a), np.sin(a) * np.sin(th_a), np.cos(th_a)])
+        fibs.append({'x': fx, 'y': fy, 'z': g, 'd_core': PITCH,
                      'd_clad': PITCH * 1.3, 'na': 0.15, 'boresight': b, 'w0': W0_LENS})
     return fibs
 
@@ -126,22 +146,24 @@ def mcf_fibers(g, reaim):
 # types so differences are optical, not sampling artifacts.
 CONFIGS = [
     dict(name="SM",            exc="SM",  model=MODE_OVERLAP_MODEL,
-         fibers=lambda g: [{'x': 0.0, 'y': 0.0, 'z': GAPS[-1], 'd_core': 4.0,
+         fibers=lambda g: [{'x': 0.0, 'y': 0.0, 'z': g, 'd_core': 4.0,
                             'd_clad': 125.0, 'na': 0.12}],
          na=0.12, tf=t_face(1.46), n1=65_536, nen=16_384,
          color="#2a78d6", ls="-",  marker="o"),
     dict(name="MM",            exc="MM",  model=GEOMETRIC_MODEL,
-         fibers=lambda g: [{'x': 0.0, 'y': 0.0, 'z': GAPS[-1], 'd_core': 50.0,
+         fibers=lambda g: [{'x': 0.0, 'y': 0.0, 'z': g, 'd_core': 50.0,
                             'd_clad': 125.0, 'na': 0.22}],
          na=0.22, tf=t_face(1.46), n1=65_536, nen=16_384,
          color="#1baf7a", ls="-",  marker="s"),
     dict(name="MCF fixed aim", exc="MCF", model=MODE_OVERLAP_MODEL,
            fibers=lambda g: mcf_fibers(g, reaim=False),
-           na=0.15, tf=t_face(1.51), n1=65_536, nen=16_384,
+           # The pupil's diffraction-limited angular width needs a finer
+           # escape-cone grid than the broad SM/MM acceptances.
+           na=0.15, tf=t_face(1.51), n1=131_072, nen=65_536,
            color="#d78500", ls="-",  marker="^"),
     dict(name="MCF re-aimed",    exc="MCF", model=MODE_OVERLAP_MODEL,
          fibers=lambda g: mcf_fibers(g, reaim=True),
-         na=0.15, tf=t_face(1.51), n1=65_536, nen=16_384,
+         na=0.15, tf=t_face(1.51), n1=131_072, nen=65_536,
          color="#d78500", ls="--", marker="v"),
 ]
 
@@ -390,6 +412,79 @@ def fig3(results):
     ax.legend(fontsize=8.5)
     save(fig, "fig3_resolution_vs_gap")
 
+
+def fig4_mcf_ray_trace(results):
+    """MCF geometry plus a deterministic meridional ray trace at its best gap."""
+    cfg = results["MCF fixed aim"]['cfg']
+    g = results["MCF fixed aim"]['g_opt']
+    all_fibers = cfg['fibers'](g)
+    # The x-z slice intersects only the two opposite side lenses.  It is a
+    # ray-trace view, not a fictitious lens-sag model.
+    fibers = [all_fibers[0], all_fibers[3]]
+    theta_c = np.arcsin(N_MED / N_DIA_RED)
+    theta = np.linspace(-0.999 * theta_c, 0.999 * theta_c, 4001)
+    v0 = np.column_stack((np.sin(theta), np.zeros_like(theta), np.cos(theta)))
+    trace = run_ray_tracing(np.array([[0.0, 0.0, -NV_DEPTH]]), v0,
+                            np.ones(len(v0)), N_DIA_RED, N_MED, g, fibers,
+                            MODE_OVERLAP_MODEL, LAM_RED)
+    accepted_by = np.vstack([s['collected_mask'][0] for s in trace['fiber_stats']])
+    accepted = np.any(accepted_by, axis=0)
+    x_int, x_f = trace['X_int'][0], trace['X_f'][0]
+
+    fig, (ax_top, ax) = plt.subplots(1, 2, figsize=(8.0, 3.7),
+                                     gridspec_kw=dict(width_ratios=[0.82, 1.48]))
+    angles = np.arange(6) * np.pi / 3.0
+    core_xy = PITCH * np.column_stack((np.cos(angles), np.sin(angles)))
+    pupil_xy = LENS_R * np.column_stack((np.cos(angles), np.sin(angles)))
+    ax_top.scatter(core_xy[:, 0], core_xy[:, 1], s=52, facecolor="#2a78d6",
+                   edgecolor="white", linewidth=0.7, label="physical side core")
+    ax_top.scatter(pupil_xy[:, 0], pupil_xy[:, 1], s=30, facecolor="#d78500",
+                   edgecolor="white", linewidth=0.7, label="red lens pupil")
+    ax_top.scatter([0], [0], s=58, marker="s", color="#1baf7a", label="green core")
+    for core, pupil in zip(core_xy, pupil_xy):
+        ax_top.plot([core[0], pupil[0]], [core[1], pupil[1]], color="#a7a59e", lw=0.8)
+    ax_top.set_aspect("equal")
+    ax_top.set_xlim(-43, 43)
+    ax_top.set_ylim(-43, 43)
+    ax_top.set_xlabel("x ($\\mu$m)")
+    ax_top.set_ylabel("y ($\\mu$m)")
+    ax_top.set_title("(a) MCF end-face geometry", loc="left", fontsize=9.5, color=INK2)
+    ax_top.legend(fontsize=7, loc="lower center", bbox_to_anchor=(0.5, -0.37))
+
+    ax.axvspan(-100, 0, color="#c9e5f2", alpha=0.72, label="diamond")
+    ax.axvspan(0, g, color="#f5f4ef", alpha=1.0, label="air gap")
+    ax.axvspan(g, g + MCF_RED_LENS_HEIGHT, color="#e8d8b7", alpha=0.8,
+               label="IP-S red lens")
+    rejected = np.flatnonzero(~accepted)
+    for i in rejected[np.linspace(0, len(rejected) - 1, min(140, len(rejected)), dtype=int)]:
+        ax.plot([-NV_DEPTH, 0, g], [0, x_int[i], x_f[i]], color="#a7a59e", lw=0.35, alpha=0.20)
+    collected = np.flatnonzero(accepted)
+    for i in collected[np.linspace(0, len(collected) - 1, min(45, len(collected)), dtype=int)]:
+        j = np.flatnonzero(accepted_by[:, i])[0]
+        core_x = PITCH if fibers[j]['x'] > 0 else -PITCH
+        ax.plot([-NV_DEPTH, 0, g], [0, x_int[i], x_f[i]], color="#c85b17", lw=0.9, alpha=0.92)
+        ax.plot([g, g + MCF_RED_LENS_HEIGHT], [x_f[i], core_x], color="#c85b17",
+                lw=0.65, ls="--", alpha=0.7)
+    ax.scatter([0], [0], s=38, color="#0b0b0b", zorder=5, label="single NV")
+    for sign in (-1, 1):
+        ax.scatter([g], [sign * LENS_R], s=30, color="#d78500", zorder=5)
+        ax.scatter([g + MCF_RED_LENS_HEIGHT], [sign * PITCH], s=34, color="#2a78d6", zorder=5)
+    ax.axvline(0, color="#75808a", lw=0.8)
+    ax.axvline(g, color="#75808a", lw=0.8)
+    ax.set_xlim(-105, g + MCF_RED_LENS_HEIGHT + 12)
+    ax.set_ylim(-52, 52)
+    ax.set_xlabel("z from diamond surface ($\\mu$m)")
+    ax.set_ylabel("x in meridional plane ($\\mu$m)")
+    ax.set_title(f"(b) 700 nm rays at fixed-design optimum, g = {g:.0f} $\\mu$m", loc="left", fontsize=9.5, color=INK2)
+    ax.text(0.98, 0.04, "orange = collected; dashed =\neffective pupil-to-core map",
+            transform=ax.transAxes, ha="right", va="bottom", fontsize=7.2, color=INK2)
+    fig.text(0.5, 0.005,
+             "MCF values: Shukhin et al., OMN 2024; microlens.xlsx orange (650 nm) design. "
+             "The curved printed lens is modeled as an effective Gaussian pupil, not an assumed sag profile.",
+             ha="center", fontsize=7.2, color=INK2)
+    fig.tight_layout(rect=(0, 0.08, 1, 1))
+    save(fig, "fig4_mcf_ray_trace")
+
 # ================================ main ==================================
 if __name__ == "__main__":
     t0 = time.time()
@@ -400,6 +495,7 @@ if __name__ == "__main__":
     fig1(results)
     fig2(results, spectra)
     fig3(results)
+    fig4_mcf_ray_trace(results)
 
     print(f"\nfigures written to {OUT}  ({time.time()-t0:.0f} s)")
     print(f"max saturation parameter s = I/I_sat encountered: {s_max:.2e}"
@@ -411,8 +507,9 @@ if __name__ == "__main__":
         k = int(np.argmax(r['eta1']))
         print(f"{name:>14} | {r['g_opt']:7.0f} | {r['eta1'][k]*100:10.4f} | "
               f"{r['rate1'][k]*1e-3:12.5f} | {r['powE'][k]:10.3f} | {r['a50'][k]:12.1f}")
-    print("\nNotes: fixed-aim MCF boresights preserve the paper design's ~300 um air-side"
-          "\nconvergence; re-aimed MCF recalculates the side-core boresights at every gap."
+    print("\nNotes: fixed-aim MCF uses the paper/spreadsheet 650 nm red design: 16.8434 um"
+          "\nlens-pupil radius, 141.185 um air path and a 30 um target depth; re-aimed MCF"
+          "\nrecalculates the side-core boresights at every gap for the 85 um NV layer."
           "\nA50 is an on-axis circular area on the NV layer containing 50% of the"
           "\nexcitation x collection weighted ensemble signal. Single-NV rates are reported"
           "\nin kcps; ensemble operation is the practical mode for this deep NV layer.")
