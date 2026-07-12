@@ -1,12 +1,16 @@
 import streamlit as st
 import numpy as np
 import plotly.graph_objects as go
-import plotly.express as px
 from plotly.subplots import make_subplots
 import matplotlib.pyplot as plt
+from matplotlib.collections import LineCollection
 
-# numpy >= 2.0 renamed np.trapz -> np.trapezoid; stay compatible with both
-trapz = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
+from physics import (
+    trapz, diamond_sellmeier, nv_emission_spectrum, optics_survival,
+    GEOMETRIC_MODEL, MODE_OVERLAP_MODEL, fiber_mode_params, compute_coupling,
+    angle_to_boresight, generate_emitters, sample_ray_directions, run_ray_tracing,
+    lens_dome_mesh,
+)
 
 # ==========================================
 # Page Configuration & Styling
@@ -86,373 +90,57 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ==========================================
-# Crystal & Dipole Constants & Orientations
-# ==========================================
-# Standard diamond NV axes in (100) cut where normal is Z [001]
-NV_AXES = {
-    "[111]": np.array([1.0, 1.0, 1.0]) / np.sqrt(3.0),
-    "[1-1-1]": np.array([1.0, -1.0, -1.0]) / np.sqrt(3.0),
-    "[-11-1]": np.array([-1.0, 1.0, -1.0]) / np.sqrt(3.0),
-    "[-1-11]": np.array([-1.0, -1.0, 1.0]) / np.sqrt(3.0)
-}
-
-# ==========================================
-# Spectral Model: Diamond Dispersion + NV Emission
-# ==========================================
-
-def diamond_sellmeier(lambda_um):
+def sweep_efficiency(X_f, Y_f, fibers, V1, sin2_sq, tir_mask, W, coupling_model,
+                     lam_rep, n_med, num_rays):
     """
-    Refractive index of diamond vs wavelength via the Sellmeier equation
-    (lambda in micrometres):
-        n^2 = 1 + 0.3306 L/(L - 0.175^2) + 4.3356 L/(L - 0.106^2),  L = lambda^2
-    Reproduces n = 2.4173 @ 589 nm and n = 2.4118 @ 637 nm (NV ZPL),
-    valid across the visible / NV emission band.
+    Mean per-fiber collection efficiency for one alignment configuration.
+    X_f, Y_f are the facet-plane ray intersections for the current sweep step
+    (the caller shifts them for an X sweep or re-propagates them for a Z sweep).
+    sin2_sq is the shared on-axis angle; a fiber with its own 'boresight' (a
+    tilted microlens channel) is measured against that instead, via V1 — same
+    fallback rule as run_ray_tracing's per-fiber loop.
+    Returns an array of length len(fibers).
     """
-    l2 = np.asarray(lambda_um, dtype=float) ** 2
-    n2 = 1.0 + 0.3306 * l2 / (l2 - 0.175 ** 2) + 4.3356 * l2 / (l2 - 0.106 ** 2)
-    return np.sqrt(n2)
-
-def nv_emission_spectrum(lambda_nm):
-    """
-    Approximate NV- room-temperature emission spectrum S(lambda) (un-normalised).
-    A sharp zero-phonon line (ZPL) at 637 nm carrying roughly the Debye-Waller
-    fraction (~4%) plus a broad phonon sideband peaking near 690 nm and trailing
-    to ~800 nm. The caller normalises so that the integral of S over lambda = 1.
-    """
-    lam = np.asarray(lambda_nm, dtype=float)
-    sideband = np.exp(-0.5 * ((lam - 690.0) / 50.0) ** 2)
-    zpl = 0.52 * np.exp(-0.5 * ((lam - 637.0) / 4.0) ** 2)
-    return sideband + zpl
-
-def optics_survival(include, n_core, n_med, alpha_db_km, length_m, filter_t, det_qe):
-    """
-    Post-fibre optical survival factor:
-        eta_optics = T_face * T_prop * T_filter * QE_detector
-    where T_face is the normal-incidence Fresnel transmission at the fibre
-    entrance face (gap medium -> core), T_prop is propagation survival from the
-    fibre attenuation, T_filter the spectral-filter transmission and QE the
-    detector quantum efficiency. Returns (eta, breakdown_dict).
-    Returns 1.0 (and an empty breakdown) when disabled.
-    """
-    if not include:
-        return 1.0, {}
-    t_face = 1.0 - ((n_core - n_med) / (n_core + n_med)) ** 2
-    t_prop = 10.0 ** (-(alpha_db_km * (length_m / 1000.0)) / 10.0)
-    eta = t_face * t_prop * filter_t * det_qe
-    return eta, {'face': t_face, 'prop': t_prop, 'filter': filter_t, 'qe': det_qe}
-
-GEOMETRIC_MODEL = "Geometric (multimode)"
-MODE_OVERLAP_MODEL = "Mode overlap (Gaussian)"
-
-def fiber_mode_params(d_core, na, lambda_nm, n_med):
-    """
-    Step-index fiber modal parameters at a given wavelength:
-      V        normalized frequency  V = 2*pi*a*NA / lambda
-      n_modes  approximate guided mode count (large-V limit)  M ~ V^2 / 2
-      w0       fundamental-mode (LP01) field radius via Marcuse's fit
-                 w0/a = 0.65 + 1.619 V^-1.5 + 2.879 V^-6   (best for 1.2 < V < 2.4)
-      na_mode  effective mode NA in the gap medium (Gaussian divergence)
-                 sin(theta_mode) ~ lambda / (pi * n_med * w0)
-    Lengths in micrometres.
-    """
-    a = d_core / 2.0
-    lam = lambda_nm / 1000.0
-    V = 2.0 * np.pi * a * na / lam
-    n_modes = max(V * V / 2.0, 1.0)
-    Vc = max(V, 1.2)                       # clamp: Marcuse fit diverges as V->0
-    w0 = a * (0.65 + 1.619 * Vc ** -1.5 + 2.879 * Vc ** -6)
-    na_mode = lam / (np.pi * n_med * w0)
-    return V, n_modes, w0, na_mode
-
-def compute_coupling(dist_sq, sin2_sq, tir_mask, r_core, na, n_med,
-                     coupling_model, w0=0.0, na_mode=0.0):
-    """
-    Per-ray coupling weight in [0, 1] at the fiber facet.
-
-    Geometric (multimode): hard acceptance, weight = 1 if the ray lands inside
-    the core AND within the NA cone (and is not TIR), else 0. Correct in the
-    many-mode limit where the étendue cells fill the geometric acceptance.
-
-    Mode overlap (Gaussian): phase-space overlap with the fundamental LP01 mode,
-    modelled as a Gaussian Wigner distribution that is separable in transverse
-    position and angle:
-        c = exp(-2 rho^2 / w0^2) * exp(-2 sin^2(theta2) / na_mode^2) * (not TIR)
-    i.e. mode matching against the single guided mode of waist w0 / NA na_mode.
-    """
-    not_tir = ~tir_mask
-    if coupling_model == MODE_OVERLAP_MODEL:
-        spatial = np.exp(-2.0 * dist_sq / (w0 * w0))
-        angular = np.exp(-2.0 * sin2_sq / (na_mode * na_mode))
-        return spatial * angular * not_tir
-    in_core = dist_sq <= r_core ** 2
-    in_na = sin2_sq <= (na / n_med) ** 2
-    return (in_core & in_na & not_tir).astype(float)
-
-# ==========================================
-# Physical Simulation Functions
-# ==========================================
-
-def get_collection_limit_radius(depth, z_fiber, na, n_dia, n_med, r_core):
-    """
-    Calculate the maximum physical radius from the fiber centers where NVs can be collected.
-    Uses fiber NA and refraction equations to bound the simulation volume.
-    """
-    # Max angle inside diamond that can be accepted by the fiber NA
-    # n_dia * sin(theta_dia) = n_med * sin(theta_med) <= NA
-    sin_theta_dia_max = na / n_dia
-    if sin_theta_dia_max >= 1.0:
-        # No NA limit inside diamond (unlikely as n_dia is 2.417 and NA is ~0.2-0.5)
-        theta_dia_max = np.arcsin(n_med / n_dia)  # Limited by TIR
-    else:
-        theta_dia_max = np.arcsin(sin_theta_dia_max)
-        
-    tan_theta_dia_max = np.tan(theta_dia_max)
-    
-    # Max angle in the air/coupling medium
-    sin_theta_med_max = na / n_med
-    if sin_theta_med_max >= 1.0:
-        theta_med_max = np.pi / 2.0
-    else:
-        theta_med_max = np.arcsin(sin_theta_med_max)
-        
-    tan_theta_med_max = np.tan(theta_med_max)
-    
-    # Max lateral displacements
-    l_dia = depth * tan_theta_dia_max
-    l_med = z_fiber * tan_theta_med_max
-    
-    return l_dia + r_core + l_med
-
-def generate_emitters(mode, depth, width, ppm, num_emitters, fibers, na, n_dia, n_med, seed=42):
-    """
-    Generate NV coordinates (in um) and density scaling factors.
-    Returns:
-        emitters: np.array of shape (num_emitters, 3)
-        n_actual: estimated actual number of NVs in the active volume
-        volume: volume or area of the active region
-        box_dims: bounding box coordinates [xmin, xmax, ymin, ymax]
-    """
-    np.random.seed(seed)
-    
-    # Extract fiber coordinate range
-    fiber_x = np.array([f['x'] for f in fibers])
-    fiber_y = np.array([f['y'] for f in fibers])
-    r_core = max([f['d_core'] for f in fibers]) / 2.0
-    
-    # Max collection radius from any fiber center
-    r_collect = get_collection_limit_radius(depth + width/2.0, max(0.0, fibers[0]['z']), na, n_dia, n_med, r_core)
-    
-    # Bounding box of simulation region
-    x_min = np.min(fiber_x) - r_collect
-    x_max = np.max(fiber_x) + r_collect
-    y_min = np.min(fiber_y) - r_collect
-    y_max = np.max(fiber_y) + r_collect
-    
-    area_um2 = (x_max - x_min) * (y_max - y_min)
-    
-    # Volumetric density for 1 ppm of NVs: 1.76e5 NVs / um^3
-    rho_vol = ppm * 1.76e5
-    
-    if mode == "Single NV":
-        emitters = np.array([[0.0, 0.0, -depth]])
-        n_actual = 1
-        volume = 0.0
-        box_dims = (0, 0, 0, 0)
-    elif mode == "2D Layer (Plane)":
-        # Generate NVs at a fixed depth Z = -depth
-        x = np.random.uniform(x_min, x_max, num_emitters)
-        y = np.random.uniform(y_min, y_max, num_emitters)
-        z = np.full(num_emitters, -depth)
-        emitters = np.column_stack((x, y, z))
-        
-        # For a 2D plane, sheet density is calculated assuming a nominal thickness (e.g. 1 nm monolayer = 0.001 um)
-        thickness_2d = 0.001 # 1 nm
-        rho_sheet = rho_vol * thickness_2d # NVs / um^2
-        n_actual = rho_sheet * area_um2
-        volume = area_um2
-        box_dims = (x_min, x_max, y_min, y_max)
-    else: # 3D Layer
-        # Generate NVs distributed in Z over [-depth - width/2, -depth + width/2]
-        x = np.random.uniform(x_min, x_max, num_emitters)
-        y = np.random.uniform(y_min, y_max, num_emitters)
-        z_min = -depth - width / 2.0
-        z_max = -depth + width / 2.0
-        z = np.random.uniform(z_min, z_max, num_emitters)
-        emitters = np.column_stack((x, y, z))
-        
-        volume = area_um2 * width # um^3
-        n_actual = rho_vol * volume
-        box_dims = (x_min, x_max, y_min, y_max)
-        
-    return emitters, n_actual, volume, box_dims
-
-def sample_ray_directions(num_rays, emitter_type, orientation, custom_dir=None, seed=42):
-    """
-    Generate unit direction vectors over the upper hemisphere and their respective emission weights.
-    Returns:
-        V0: np.array of shape (num_rays, 3)
-        W0: np.array of shape (num_rays,) representing relative weights
-    """
-    np.random.seed(seed)
-    
-    # Uniform sampling of upper hemisphere
-    phi = np.random.uniform(0.0, 2.0 * np.pi, num_rays)
-    cos_theta = np.random.uniform(0.0, 1.0, num_rays) # cos(theta) from 0 to 1
-    sin_theta = np.sqrt(1.0 - cos_theta**2)
-    
-    v0x = sin_theta * np.cos(phi)
-    v0y = sin_theta * np.sin(phi)
-    v0z = cos_theta
-    V0 = np.column_stack((v0x, v0y, v0z))
-    
-    # Compute relative emission weights
-    if emitter_type == "Isotropic":
-        W0 = np.ones(num_rays)
-    elif emitter_type == "Single Dipole":
-        if orientation == "Perpendicular to surface [001]":
-            d = np.array([0.0, 0.0, 1.0])
-        elif orientation == "Parallel to surface [100]":
-            d = np.array([1.0, 0.0, 0.0])
-        elif orientation == "Parallel to surface [010]":
-            d = np.array([0.0, 1.0, 0.0])
-        else: # Custom
-            d = np.array(custom_dir) if custom_dir is not None else np.array([1.0, 0.0, 0.0])
-            d_norm = np.linalg.norm(d)
-            d = d / d_norm if d_norm > 0 else np.array([1.0, 0.0, 0.0])
-            
-        # Single dipole intensity: I(v) = 1.5 * (1 - (d.v)^2)
-        dot_product = np.dot(V0, d)
-        W0 = 1.5 * (1.0 - dot_product**2)
-        
-    else: # NV Symmetry Axis (2 orthogonal dipoles)
-        if orientation == "Ensemble (4-axis average)":
-            # Average over all 4 standard orientations
-            W_sum = np.zeros(num_rays)
-            for key, u in NV_AXES.items():
-                # NV axis intensity: I(v) = 0.75 * (1 + (u.v)^2)
-                dot_product = np.dot(V0, u)
-                W_sum += 0.75 * (1.0 + dot_product**2)
-            W0 = W_sum / 4.0
-        else: # Specific NV axis
-            u = NV_AXES[orientation]
-            dot_product = np.dot(V0, u)
-            W0 = 0.75 * (1.0 + dot_product**2)
-            
-    return V0, W0
-
-def run_ray_tracing(emitters, V0, W0, n_dia, n_med, z_fiber, fibers,
-                    coupling_model=GEOMETRIC_MODEL, lambda_nm=637.0):
-    """
-    Run vectorized ray tracing for all emitters and rays.
-    coupling_model selects geometric (hard core+NA) or Gaussian mode-overlap
-    acceptance; lambda_nm sets the fiber mode size in the mode-overlap case.
-    Returns:
-        results dict containing coordinates and collection stats.
-    """
-    n_nv = len(emitters)
-    n_r = len(V0)
-    
-    # 1. Emitter positions (P0) broadcasted: shape (n_nv, 1, 3)
-    P0 = emitters[:, np.newaxis, :]
-    
-    # 2. Ray directions (V0) broadcasted: shape (1, n_r, 3)
-    V0_b = V0[np.newaxis, :, :]
-    W0_b = W0[np.newaxis, :]
-    
-    # 3. Intersection with Z = 0 (diamond-medium interface)
-    # Z_int = 0 => P0_z + t * V0_z = 0 => t = -P0_z / V0_z
-    t = - P0[:, :, 2] / V0_b[:, :, 2] # shape (n_nv, n_r)
-    
-    X_int = P0[:, :, 0] + t * V0_b[:, :, 0] # shape (n_nv, n_r)
-    Y_int = P0[:, :, 1] + t * V0_b[:, :, 1] # shape (n_nv, n_r)
-    
-    # 4. Refraction at interface
-    cos1 = V0_b[:, :, 2] # cos(theta1), shape (1, n_r) -> broadcasted to (n_nv, n_r)
-    sin1_sq = 1.0 - cos1**2
-    
-    # Critical angle condition: n_dia * sin(theta1) = n_med * sin(theta2)
-    sin2_sq = (n_dia / n_med)**2 * sin1_sq
-    tir_mask = sin2_sq > 1.0 # Total Internal Reflection
-    
-    cos2 = np.sqrt(np.maximum(0.0, 1.0 - sin2_sq))
-    
-    # Refracted direction vector V1 in the coupling medium
-    # V1 = (n_dia/n_med)*V0_xy + cos(theta2)*Z_unit
-    V1 = np.zeros((n_nv, n_r, 3))
-    V1[:, :, 0] = (n_dia / n_med) * V0_b[:, :, 0]
-    V1[:, :, 1] = (n_dia / n_med) * V0_b[:, :, 1]
-    V1[:, :, 2] = cos2
-    
-    # 5. Fresnel Transmission coefficient (average of s & p polarization)
-    # Avoid division by zero at normal incidence (though NumPy handles it gracefully)
-    n1_cos1 = n_dia * cos1
-    n2_cos2 = n_med * cos2
-    n1_cos2 = n_dia * cos2
-    n2_cos1 = n_med * cos1
-    
-    r_s = (n1_cos1 - n2_cos2) / (n1_cos1 + n2_cos2 + 1e-15)
-    r_p = (n1_cos2 - n2_cos1) / (n1_cos2 + n2_cos1 + 1e-15)
-    
-    R_s = r_s**2
-    R_p = r_p**2
-    T = 0.5 * (2.0 - R_s - R_p)
-    T[tir_mask] = 0.0 # No transmission for TIR
-    
-    # Transmitted Ray weights
-    W = W0_b * T # shape (n_nv, n_r)
-    
-    # 6. Propagation to fiber facet plane Z = Z_fiber
-    # Z_fiber is the air gap
-    denom = np.where(V1[:, :, 2] > 0, V1[:, :, 2], 1.0)
-    X_f = X_int + z_fiber * V1[:, :, 0] / denom
-    Y_f = Y_int + z_fiber * V1[:, :, 1] / denom
-    
-    # 7. Evaluate collection by each fiber
-    collection_stats = []
-    
-    for i, f in enumerate(fibers):
+    effs = np.empty(len(fibers))
+    for f_idx, f in enumerate(fibers):
         r_core = f['d_core'] / 2.0
-        na = f['na']
-
-        # Transverse miss-distance at the facet
-        dist_sq = (X_f - f['x'])**2 + (Y_f - f['y'])**2
-
-        # Fundamental-mode size (only needed for the mode-overlap model)
+        boresight = f.get('boresight')
+        sin2_local = angle_to_boresight(V1, boresight) if boresight is not None else sin2_sq
         if coupling_model == MODE_OVERLAP_MODEL:
-            _, _, w0, na_mode = fiber_mode_params(f['d_core'], na, lambda_nm, n_med)
+            if 'w0' in f:
+                w0_s = f['w0']
+                na_mode_s = (lam_rep / 1000.0) / (np.pi * n_med * w0_s)
+            else:
+                _, _, w0_s, na_mode_s = fiber_mode_params(f['d_core'], f['na'], lam_rep, n_med)
         else:
-            w0, na_mode = 0.0, 0.0
+            w0_s, na_mode_s = 0.0, 0.0
+        dist_sq = (X_f - f['x']) ** 2 + (Y_f - f['y']) ** 2
+        coupling = compute_coupling(dist_sq, sin2_local, tir_mask, r_core, f['na'], n_med,
+                                    coupling_model, w0_s, na_mode_s)
+        effs[f_idx] = np.mean(0.5 * np.sum(W * coupling, axis=1) / num_rays)
+    return effs
 
-        # Per-ray coupling weight (binary geometric, or Gaussian mode overlap)
-        coupling = compute_coupling(dist_sq, sin2_sq, tir_mask, r_core, na, n_med,
-                                    coupling_model, w0, na_mode)
+def plot_sweep(x_vals, sweep_effs, num_fibers, title, x_title):
+    """Per-fiber (and combined) efficiency-vs-alignment curves, with the peak marked."""
+    combined = np.sum(sweep_effs, axis=0) if num_fibers > 1 else sweep_effs[0]
+    best_idx = int(np.argmax(combined))
 
-        # Boolean mask for visualization (geometric: accepted; mode: within 1/e^2)
-        if coupling_model == MODE_OVERLAP_MODEL:
-            collected = coupling > np.exp(-2.0)
-        else:
-            collected = coupling > 0.5
-
-        # Efficiency of this fiber for each emitter
-        # Divided by 2 because we only sampled the upper hemisphere (fraction 0.5 of 4pi)
-        effs = 0.5 * np.sum(W * coupling, axis=1) / n_r
-
-        collection_stats.append({
-            'fiber_idx': i,
-            'collected_mask': collected,
-            'efficiencies': effs,
-            'avg_efficiency': np.mean(effs)
-        })
-        
-    return {
-        'X_int': X_int, 'Y_int': Y_int,
-        'X_f': X_f, 'Y_f': Y_f,
-        'V1': V1,
-        'tir_mask': tir_mask,
-        'weights': W,
-        'fiber_stats': collection_stats
-    }
+    fig = go.Figure()
+    for f_idx in range(num_fibers):
+        fig.add_trace(go.Scatter(x=x_vals, y=sweep_effs[f_idx] * 100, mode='lines',
+                                 name=f"Fiber {f_idx+1}", line=dict(width=2)))
+    if num_fibers > 1:
+        fig.add_trace(go.Scatter(x=x_vals, y=combined * 100,
+                                 mode='lines+markers', name="Combined Bundle",
+                                 line=dict(color='#00ffcc', width=3, dash='dash')))
+    fig.add_vline(x=x_vals[best_idx], line=dict(color='white', width=1.5, dash='dot'),
+                 annotation_text=f"best: {x_vals[best_idx]:.1f}", annotation_position="top")
+    fig.update_layout(template="plotly_dark", title=title,
+                      xaxis=dict(title=x_title, gridcolor='#222222'),
+                      yaxis=dict(title="Collection Efficiency (%)", gridcolor='#222222'),
+                      height=500)
+    st.plotly_chart(fig, width='stretch')
+    st.caption(f"Best {x_title}: **{x_vals[best_idx]:.2f}** → combined η = **{combined[best_idx]*100:.4f}%**")
 
 # ==========================================
 # UI Layout & User Inputs
@@ -547,78 +235,129 @@ else:
 st.sidebar.markdown("---")
 st.sidebar.subheader("🔌 Fibers Configuration")
 
-coupling_model = st.sidebar.radio(
-    "Coupling Model",
-    [GEOMETRIC_MODEL, MODE_OVERLAP_MODEL],
-    help="Geometric: hard core + NA acceptance — valid for highly multimode fibers "
-         "(many guided modes). Mode overlap: Gaussian phase-space overlap with the "
-         "fundamental LP01 mode (waist w0, mode NA) — the single-/few-mode coupling "
-         "or 'mode matching' efficiency. The V-number and mode count are reported above the plots."
+fiber_type = st.sidebar.selectbox(
+    "Fiber Type", ["Custom", "SM (single-mode)", "MM (multi-mode)", "MCF (6-core, microlensed)"],
+    help="SM/MM/MCF are presets matching the Fiber Comparison page (MCF geometry from "
+         "Shukhin et al., OMN 2024). Pick Custom for the free-form fiber count/layout below."
 )
 
-num_fibers = st.sidebar.number_input("Number of Fibers", min_value=1, max_value=50, value=1, step=1)
+if fiber_type == "Custom":
+    coupling_model = st.sidebar.radio(
+        "Coupling Model",
+        [GEOMETRIC_MODEL, MODE_OVERLAP_MODEL],
+        help="Geometric: hard core + NA acceptance — valid for highly multimode fibers "
+             "(many guided modes). Mode overlap: Gaussian phase-space overlap with the "
+             "fundamental LP01 mode (waist w0, mode NA) — the single-/few-mode coupling "
+             "or 'mode matching' efficiency. The V-number and mode count are reported above the plots."
+    )
 
-fiber_layout = st.sidebar.selectbox("Fiber Arrangement", ["Single Fiber", "Linear Array (X-axis)", "Custom Coordinates"])
+    num_fibers = st.sidebar.number_input("Number of Fibers", min_value=1, max_value=50, value=1, step=1)
 
-if fiber_layout == "Single Fiber":
-    d_core = st.sidebar.number_input("Core Diameter [µm]", min_value=1.0, max_value=1000.0, value=50.0, step=5.0)
-    d_clad = st.sidebar.number_input("Cladding Diameter [µm]", min_value=1.0, max_value=2000.0, value=125.0, step=5.0)
-    fiber_na = st.sidebar.number_input("Numerical Aperture (NA)", min_value=0.01, max_value=1.0, value=0.22, step=0.01)
-    
-    st.sidebar.markdown("**Offsets**")
-    z_fiber = st.sidebar.number_input("Z Offset (Air Gap) [µm]", min_value=0.0, max_value=5000.0, value=10.0, step=1.0,
-                                     help="Distance between the diamond surface Z=0 and fiber facets. Can be 0.")
-    x_offset = st.sidebar.number_input("X Offset [µm]", min_value=-500.0, max_value=5000.0, value=0.0, step=1.0)
-    y_offset = st.sidebar.number_input("Y Offset [µm]", min_value=-500.0, max_value=5000.0, value=0.0, step=1.0)
-    
-    fibers = [{'x': x_offset, 'y': y_offset, 'z': z_fiber, 'd_core': d_core, 'd_clad': d_clad, 'na': fiber_na}]
-    
-elif fiber_layout == "Linear Array (X-axis)":
-    d_core = st.sidebar.number_input("Core Diameter (for each) [µm]", min_value=1.0, max_value=1000.0, value=50.0, step=5.0)
-    d_clad = st.sidebar.number_input("Cladding Diameter (for each) [µm]", min_value=1.0, max_value=2000.0, value=125.0, step=5.0)
-    fiber_na = st.sidebar.number_input("Numerical Aperture (NA)", min_value=0.01, max_value=1.0, value=0.22, step=0.01)
-    
-    fiber_pitch = st.sidebar.number_input("Fiber Pitch (spacing center-to-center) [µm]", min_value=1.0, max_value=2000.0, value=125.0, step=5.0,
-                                         help="Spacing between adjacent fiber centers. Defaults to cladding diameter.")
-    
-    st.sidebar.markdown("**Offsets**")
-    z_fiber = st.sidebar.number_input("Z Offset (Air Gap) [µm]", min_value=0.0, max_value=5000.0, value=10.0, step=1.0)
-    x_offset = st.sidebar.number_input("Array Center X Offset [µm]", min_value=-1000.0, max_value=1000.0, value=0.0, step=1.0)
-    y_offset = st.sidebar.number_input("Array Center Y Offset [µm]", min_value=-1000.0, max_value=1000.0, value=0.0, step=1.0)
-    
-    fibers = []
-    for i in range(num_fibers):
-        # Spaced symmetrically along X axis
-        x_c = x_offset + (i - (num_fibers - 1) / 2.0) * fiber_pitch
-        fibers.append({
-            'x': x_c, 'y': y_offset, 'z': z_fiber,
-            'd_core': d_core, 'd_clad': d_clad, 'na': fiber_na
-        })
+    fiber_layout = st.sidebar.selectbox("Fiber Arrangement", ["Single Fiber", "Linear Array (X-axis)", "Custom Coordinates"])
 
-else: # Custom coordinates
-    d_core = st.sidebar.number_input("Core Diameter (for all) [µm]", min_value=1.0, max_value=1000.0, value=50.0, step=5.0)
-    d_clad = st.sidebar.number_input("Cladding Diameter (for all) [µm]", min_value=1.0, max_value=2000.0, value=125.0, step=5.0)
-    fiber_na = st.sidebar.number_input("Numerical Aperture (NA)", min_value=0.01, max_value=1.0, value=0.22, step=0.01)
-    z_fiber = st.sidebar.number_input("Z Offset (Air Gap) [µm]", min_value=0.0, max_value=5000.0, value=10.0, step=1.0)
-    
-    x_coords_str = st.sidebar.text_input("X coordinates (comma separated) [µm]", "0, 125, -125")
-    y_coords_str = st.sidebar.text_input("Y coordinates (comma separated) [µm]", "0, 0, 0")
-    
-    try:
-        xs = [float(x.strip()) for x in x_coords_str.split(",")]
-        ys = [float(y.strip()) for y in y_coords_str.split(",")]
-        
-        # Ensure sizes match
-        n_c = min(len(xs), len(ys), num_fibers)
+    if fiber_layout == "Single Fiber":
+        d_core = st.sidebar.number_input("Core Diameter [µm]", min_value=1.0, max_value=1000.0, value=50.0, step=5.0)
+        d_clad = st.sidebar.number_input("Cladding Diameter [µm]", min_value=1.0, max_value=2000.0, value=125.0, step=5.0)
+        fiber_na = st.sidebar.number_input("Numerical Aperture (NA)", min_value=0.01, max_value=1.0, value=0.22, step=0.01)
+
+        st.sidebar.markdown("**Offsets**")
+        z_fiber = st.sidebar.number_input("Z Offset (Air Gap) [µm]", min_value=0.0, max_value=5000.0, value=10.0, step=1.0,
+                                         help="Distance between the diamond surface Z=0 and fiber facets. Can be 0.")
+        x_offset = st.sidebar.number_input("X Offset [µm]", min_value=-500.0, max_value=5000.0, value=0.0, step=1.0)
+        y_offset = st.sidebar.number_input("Y Offset [µm]", min_value=-500.0, max_value=5000.0, value=0.0, step=1.0)
+
+        fibers = [{'x': x_offset, 'y': y_offset, 'z': z_fiber, 'd_core': d_core, 'd_clad': d_clad, 'na': fiber_na}]
+
+    elif fiber_layout == "Linear Array (X-axis)":
+        d_core = st.sidebar.number_input("Core Diameter (for each) [µm]", min_value=1.0, max_value=1000.0, value=50.0, step=5.0)
+        d_clad = st.sidebar.number_input("Cladding Diameter (for each) [µm]", min_value=1.0, max_value=2000.0, value=125.0, step=5.0)
+        fiber_na = st.sidebar.number_input("Numerical Aperture (NA)", min_value=0.01, max_value=1.0, value=0.22, step=0.01)
+
+        fiber_pitch = st.sidebar.number_input("Fiber Pitch (spacing center-to-center) [µm]", min_value=1.0, max_value=2000.0, value=125.0, step=5.0,
+                                             help="Spacing between adjacent fiber centers. Defaults to cladding diameter.")
+
+        st.sidebar.markdown("**Offsets**")
+        z_fiber = st.sidebar.number_input("Z Offset (Air Gap) [µm]", min_value=0.0, max_value=5000.0, value=10.0, step=1.0)
+        x_offset = st.sidebar.number_input("Array Center X Offset [µm]", min_value=-1000.0, max_value=1000.0, value=0.0, step=1.0)
+        y_offset = st.sidebar.number_input("Array Center Y Offset [µm]", min_value=-1000.0, max_value=1000.0, value=0.0, step=1.0)
+
         fibers = []
-        for i in range(n_c):
+        for i in range(num_fibers):
+            # Spaced symmetrically along X axis
+            x_c = x_offset + (i - (num_fibers - 1) / 2.0) * fiber_pitch
             fibers.append({
-                'x': xs[i], 'y': ys[i], 'z': z_fiber,
+                'x': x_c, 'y': y_offset, 'z': z_fiber,
                 'd_core': d_core, 'd_clad': d_clad, 'na': fiber_na
             })
-    except Exception as e:
-        st.sidebar.error("Error parsing custom coordinates. Using default (0,0).")
-        fibers = [{'x': 0.0, 'y': 0.0, 'z': z_fiber, 'd_core': d_core, 'd_clad': d_clad, 'na': fiber_na}]
+
+    else: # Custom coordinates
+        d_core = st.sidebar.number_input("Core Diameter (for all) [µm]", min_value=1.0, max_value=1000.0, value=50.0, step=5.0)
+        d_clad = st.sidebar.number_input("Cladding Diameter (for all) [µm]", min_value=1.0, max_value=2000.0, value=125.0, step=5.0)
+        fiber_na = st.sidebar.number_input("Numerical Aperture (NA)", min_value=0.01, max_value=1.0, value=0.22, step=0.01)
+        z_fiber = st.sidebar.number_input("Z Offset (Air Gap) [µm]", min_value=0.0, max_value=5000.0, value=10.0, step=1.0)
+
+        x_coords_str = st.sidebar.text_input("X coordinates (comma separated) [µm]", "0, 125, -125")
+        y_coords_str = st.sidebar.text_input("Y coordinates (comma separated) [µm]", "0, 0, 0")
+
+        try:
+            xs = [float(x.strip()) for x in x_coords_str.split(",")]
+            ys = [float(y.strip()) for y in y_coords_str.split(",")]
+
+            # Ensure sizes match
+            n_c = min(len(xs), len(ys), num_fibers)
+            fibers = []
+            for i in range(n_c):
+                fibers.append({
+                    'x': xs[i], 'y': ys[i], 'z': z_fiber,
+                    'd_core': d_core, 'd_clad': d_clad, 'na': fiber_na
+                })
+        except Exception as e:
+            st.sidebar.error("Error parsing custom coordinates. Using default (0,0).")
+            fibers = [{'x': 0.0, 'y': 0.0, 'z': z_fiber, 'd_core': d_core, 'd_clad': d_clad, 'na': fiber_na}]
+
+elif fiber_type in ("SM (single-mode)", "MM (multi-mode)"):
+    is_sm = fiber_type.startswith("SM")
+    coupling_model = MODE_OVERLAP_MODEL if is_sm else GEOMETRIC_MODEL
+    st.sidebar.caption(f"Coupling model: **{coupling_model}** (fixed by fiber type)")
+
+    d_core = st.sidebar.number_input("Core Diameter [µm]", min_value=1.0, max_value=200.0,
+                                     value=4.0 if is_sm else 50.0, step=0.5 if is_sm else 5.0)
+    fiber_na = st.sidebar.number_input("Numerical Aperture (NA)", min_value=0.01, max_value=1.0,
+                                       value=0.12 if is_sm else 0.22, step=0.01)
+    d_clad = 125.0
+    z_fiber = st.sidebar.slider("Air Gap [µm]", min_value=0.0, max_value=5.0, value=0.0, step=0.5,
+                                help="0 = fiber pressed against the diamond surface.")
+    num_fibers = 1
+    fibers = [{'x': 0.0, 'y': 0.0, 'z': z_fiber, 'd_core': d_core, 'd_clad': d_clad, 'na': fiber_na}]
+
+else:  # MCF (6-core, microlensed)
+    coupling_model = MODE_OVERLAP_MODEL
+    st.sidebar.caption("Coupling model: **Mode overlap (Gaussian)** (fixed — the only valid model for the lensed cores)")
+    with st.sidebar.expander("MCF probe design (Shukhin et al., OMN 2024)", expanded=True):
+        mcf_pitch = st.number_input("Core pitch [µm]", 10.0, 100.0, 35.0, 1.0)
+        mcf_decenter = st.number_input("Lens decenter, inward [µm]", 0.0, 30.0, 18.0, 1.0)
+        mcf_standoff = st.number_input("Lens-to-diamond standoff [µm]", 50.0, 400.0, 250.0, 5.0,
+            help="Fixed by the printed scaffold in the real device, not user-adjustable in practice.")
+        mcf_target_depth = st.number_input("Design convergence depth [µm]", 5.0, 100.0, 50.0, 5.0,
+            help="Where the 6 side-core cones are aimed (mid-plane of the paper's 100 µm diamond).")
+
+    z_fiber = mcf_standoff
+    num_fibers = 6
+    fiber_na = 0.15  # placeholder: only used for the emitter bounding-box calc, not the actual (Gaussian) coupling test
+    d_core, d_clad = mcf_pitch, mcf_pitch * 1.3
+    lens_r = mcf_pitch - mcf_decenter
+    w0_lens = mcf_pitch / 2.0
+    mcf_target = np.array([0.0, 0.0, -mcf_target_depth])
+    fibers = []
+    for i in range(6):
+        ang = i * np.pi / 3.0
+        fx, fy = lens_r * np.cos(ang), lens_r * np.sin(ang)
+        boresight = np.array([fx, fy, mcf_standoff]) - mcf_target
+        boresight = boresight / np.linalg.norm(boresight)
+        fibers.append({
+            'x': fx, 'y': fy, 'z': mcf_standoff, 'd_core': mcf_pitch, 'd_clad': mcf_pitch * 1.3,
+            'na': fiber_na, 'boresight': boresight, 'w0': w0_lens
+        })
 
 # Est. total power parameter
 st.sidebar.markdown("---")
@@ -710,17 +449,22 @@ eta_optics, optics_breakdown = optics_survival(
 )
 total_eff_detected = total_eff * eta_optics
 
-# Modal parameters of the representative fiber at the representative wavelength
-V_disp, M_disp, w0_disp, na_mode_disp = fiber_mode_params(
-    fibers[0]['d_core'], fibers[0]['na'], lam_rep, n_med
-)
-single_mode = V_disp < 2.405
-mode_regime = "single-mode" if single_mode else f"≈{M_disp:.0f} modes"
+# Modal parameters of the representative fiber at the representative wavelength.
+# A lensed channel (w0 override, e.g. an MCF core) has no step-index V-number —
+# report its diffraction-limited na_mode at lam_rep instead.
+if 'w0' in fibers[0]:
+    V_disp = None
+    w0_disp = fibers[0]['w0']
+    na_mode_disp = (lam_rep / 1000.0) / (np.pi * n_med * w0_disp)
+    mode_regime = "lensed aperture (no V-number)"
+else:
+    V_disp, M_disp, w0_disp, na_mode_disp = fiber_mode_params(
+        fibers[0]['d_core'], fibers[0]['na'], lam_rep, n_med
+    )
+    mode_regime = "single-mode" if V_disp < 2.405 else f"≈{M_disp:.0f} modes"
 is_mode_overlap = (coupling_model == MODE_OVERLAP_MODEL)
 
 # ----------------- Dashboard Metrics -----------------
-max_eff = float(np.max(per_fiber_eff_lambda)) if len(fibers) > 0 else 0.0
-
 col1, col2, col3, col4 = st.columns(4)
 
 eff_label = "Mode-Matched Coupling" if is_mode_overlap else "Geometric Collection Efficiency"
@@ -764,13 +508,35 @@ with col4:
     </div>
     """, unsafe_allow_html=True)
 
+# ----------------- Per-Fiber Breakdown (optional) -----------------
+# The cards above are the bundle TOTAL (summed over fibers); with more than
+# one fiber, let the user break that down per fiber instead of just guessing
+# from the combined number.
+if len(fibers) > 1:
+    per_fiber_eff = (trapz(S_lambda[None, :] * per_fiber_eff_lambda, lambdas, axis=-1)
+                     if len(lambdas) > 1 else per_fiber_eff_lambda[:, 0])
+    if st.checkbox(f"Show per-fiber breakdown ({len(fibers)} fibers)"):
+        for row_start in range(0, len(fibers), 5):
+            row = list(enumerate(fibers))[row_start:row_start + 5]
+            for col, (i, f) in zip(st.columns(len(row)), row):
+                eff_i = float(per_fiber_eff[i])
+                det_i = (eff_i if nv_mode == "Single NV" else n_actual * eff_i) * eta_optics * nv_photon_rate
+                with col:
+                    st.markdown(f"""
+                    <div class="metric-card">
+                        <div class="metric-label">Fiber {i+1} ({f['x']:.0f}, {f['y']:.0f}) µm</div>
+                        <div class="metric-val">{eff_i*100:.3f}<span class="metric-unit">%</span></div>
+                        <div class="metric-label">{det_i:.2f} kcps</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
 # Model-state caption: spectral mode, representative index, modal regime, optical budget
 cap_parts = [f"Representative λ = {lambdas[rep_idx]:.0f} nm · n_dia(λ) = {n_dia_rep:.4f}"]
 if spectral_mode and len(lambdas) > 1:
     cap_parts.append(f"spectral avg over {len(lambdas)} bins ({lam_min:.0f}–{lam_max:.0f} nm)")
 else:
     cap_parts.append("monochromatic")
-mode_part = f"fiber V = {V_disp:.2f} ({mode_regime})"
+mode_part = mode_regime if V_disp is None else f"fiber V = {V_disp:.2f} ({mode_regime})"
 if is_mode_overlap:
     mode_part += f", mode w₀ = {w0_disp:.2f} µm, mode NA = {na_mode_disp:.3f}"
 cap_parts.append(mode_part)
@@ -788,6 +554,11 @@ Y_int = sim_results['Y_int']
 X_f = sim_results['X_f']
 Y_f = sim_results['Y_f']
 tir_mask = np.broadcast_to(sim_results['tir_mask'], X_f.shape)
+
+# Rays collected by any fiber (shared by the 3D and 2D ray visualizers)
+any_collected = np.zeros(X_f.shape, dtype=bool)
+for f_stat in sim_results['fiber_stats']:
+    any_collected |= f_stat['collected_mask']
 
 # ----------------- Tabs Layout -----------------
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -850,17 +621,30 @@ with tab1:
             legendgroup=f"fib{i}"
         ))
         
-        # Facet Core filled surface
-        r_grid, theta_grid = np.meshgrid(np.linspace(0, r_c, 8), theta)
-        x_mesh = f['x'] + r_grid * np.cos(theta_grid)
-        y_mesh = f['y'] + r_grid * np.sin(theta_grid)
-        z_mesh = np.full_like(x_mesh, z_fiber)
-        
+        # Facet Core: a printed, tilted microlens dome for boresight-steered
+        # channels (e.g. MCF), or the plain flat core disk for a bare fiber.
+        boresight = f.get('boresight')
+        if boresight is not None:
+            # boresight points away from the diamond (it's the direction rays
+            # arrive FROM, i.e. toward the fiber side) — the printed lens
+            # surface bulges the other way, out toward the diamond, so flip it.
+            x_mesh, y_mesh, z_mesh = lens_dome_mesh(
+                (f['x'], f['y'], z_fiber), -np.asarray(boresight), radius=r_c, height=r_c * 0.35)
+            core_color = 'rgba(255, 190, 60, 0.65)'
+            core_name = f"Fiber {i+1} Lens ({f['d_core']:.0f}µm, printed)"
+        else:
+            r_grid, theta_grid = np.meshgrid(np.linspace(0, r_c, 8), theta)
+            x_mesh = f['x'] + r_grid * np.cos(theta_grid)
+            y_mesh = f['y'] + r_grid * np.sin(theta_grid)
+            z_mesh = np.full_like(x_mesh, z_fiber)
+            core_color = 'rgba(0, 242, 254, 0.3)'
+            core_name = f"Fiber {i+1} Core ({f['d_core']}µm)"
+
         fig3d.add_trace(go.Surface(
             x=x_mesh, y=y_mesh, z=z_mesh,
-            colorscale=[[0, 'rgba(0, 242, 254, 0.3)'], [1, 'rgba(0, 242, 254, 0.3)']],
+            colorscale=[[0, core_color], [1, core_color]],
             showscale=False,
-            name=f"Fiber {i+1} Core ({f['d_core']}µm)",
+            name=core_name,
             legendgroup=f"fib{i}"
         ))
         
@@ -880,70 +664,56 @@ with tab1:
             showlegend=False
         ))
         
-    # Draw subset of rays
-    # Sub-sample emitters to draw
+    # Draw subset of rays. Each segment kind is batched into ONE trace via
+    # None separators — thousands of single-segment traces is what made the
+    # 3D view crawl (Plotly cost scales with trace count, not point count).
     n_draw_emitters = min(10, len(emitters))
     draw_emitter_indices = np.random.choice(len(emitters), n_draw_emitters, replace=False)
-    
-    # Sub-sample direction vectors for visualization
+
     n_draw_rays = min(num_vis_rays, num_rays)
     draw_ray_indices = np.random.choice(num_rays, n_draw_rays, replace=False)
-    
-    # Combine collected masks for any fiber
-    any_collected = np.zeros_like(X_f, dtype=bool)
-    for f_stat in sim_results['fiber_stats']:
-        any_collected |= f_stat['collected_mask']
-        
+
+    dia_x, dia_y, dia_z = [], [], []   # source -> interface (in diamond)
+    tir_x, tir_y, tir_z = [], [], []   # reflected back down (TIR)
+    col_x, col_y, col_z = [], [], []   # transmitted & collected
+    unc_x, unc_y, unc_z = [], [], []   # transmitted & not collected
+
     for em_idx in draw_emitter_indices:
         em_pos = emitters[em_idx]
-        
         for r_idx in draw_ray_indices:
             x_i = X_int[em_idx, r_idx]
             y_i = Y_int[em_idx, r_idx]
-            
-            # Inside diamond segment (Source -> Interface)
-            fig3d.add_trace(go.Scatter3d(
-                x=[em_pos[0], x_i],
-                y=[em_pos[1], y_i],
-                z=[em_pos[2], 0.0],
-                mode='lines',
-                line=dict(color='rgba(255, 127, 80, 0.25)', width=1.5),
-                showlegend=False,
-                hoverinfo='skip'
-            ))
-            
-            # Outside diamond segment
+            dia_x += [em_pos[0], x_i, None]
+            dia_y += [em_pos[1], y_i, None]
+            dia_z += [em_pos[2], 0.0, None]
+
             if tir_mask[em_idx, r_idx]:
-                # Draw small reflection back downwards
                 v_in = V0[r_idx]
-                t_refl = -em_pos[2] / 2.0 # short length
-                fig3d.add_trace(go.Scatter3d(
-                    x=[x_i, x_i + t_refl * v_in[0]],
-                    y=[y_i, y_i + t_refl * v_in[1]],
-                    z=[0.0, -t_refl * v_in[2]],
-                    mode='lines',
-                    line=dict(color='rgba(128, 128, 128, 0.15)', width=1),
-                    showlegend=False,
-                    hoverinfo='skip'
-                ))
+                t_refl = -em_pos[2] / 2.0   # short reflected stub
+                tir_x += [x_i, x_i + t_refl * v_in[0], None]
+                tir_y += [y_i, y_i + t_refl * v_in[1], None]
+                tir_z += [0.0, -t_refl * v_in[2], None]
+            elif any_collected[em_idx, r_idx]:
+                col_x += [x_i, X_f[em_idx, r_idx], None]
+                col_y += [y_i, Y_f[em_idx, r_idx], None]
+                col_z += [0.0, z_fiber, None]
             else:
-                # Transmitted ray (Interface -> Fiber plane)
-                x_f = X_f[em_idx, r_idx]
-                y_f = Y_f[em_idx, r_idx]
-                
-                is_coll = any_collected[em_idx, r_idx]
-                ray_color = 'rgba(0, 255, 100, 0.65)' if is_coll else 'rgba(255, 50, 50, 0.25)'
-                ray_width = 2.0 if is_coll else 1.2
-                
-                fig3d.add_trace(go.Scatter3d(
-                    x=[x_i, x_f],
-                    y=[y_i, y_f],
-                    z=[0.0, z_fiber],
-                    mode='lines',
-                    line=dict(color=ray_color, width=ray_width),
-                    showlegend=False,
-                    hoverinfo='skip'
-                ))
+                unc_x += [x_i, X_f[em_idx, r_idx], None]
+                unc_y += [y_i, Y_f[em_idx, r_idx], None]
+                unc_z += [0.0, z_fiber, None]
+
+    for xs, ys, zs, color, width in [
+        (dia_x, dia_y, dia_z, 'rgba(255, 127, 80, 0.25)', 1.5),
+        (tir_x, tir_y, tir_z, 'rgba(128, 128, 128, 0.15)', 1.0),
+        (unc_x, unc_y, unc_z, 'rgba(255, 50, 50, 0.25)', 1.2),
+        (col_x, col_y, col_z, 'rgba(0, 255, 100, 0.65)', 2.0),
+    ]:
+        if xs:
+            fig3d.add_trace(go.Scatter3d(
+                x=xs, y=ys, z=zs, mode='lines',
+                line=dict(color=color, width=width),
+                showlegend=False, hoverinfo='skip'
+            ))
 
     # Layout configuration
     fig3d.update_layout(
@@ -963,7 +733,7 @@ with tab1:
         height=700
     )
     
-    st.plotly_chart(fig3d, use_container_width=True)
+    st.plotly_chart(fig3d, width='stretch')
 
 # -----------------------------------------------
 # TAB 2: SPOT DIAGRAM (FIBER FACET PLANE)
@@ -1041,7 +811,7 @@ with tab2:
         margin=dict(l=40, r=40, b=40, t=40)
     )
     
-    st.plotly_chart(fig_spot, use_container_width=True)
+    st.plotly_chart(fig_spot, width='stretch')
 
 # -----------------------------------------------
 # TAB 3: 2D RAY TRAJECTORIES (XZ PLANE)
@@ -1066,12 +836,24 @@ with tab3:
         r_c = f['d_core'] / 2.0
         r_cl = f['d_clad'] / 2.0
         
-        # Core line
-        ax.plot([f['x'] - r_c, f['x'] + r_c], [z_fiber, z_fiber], color='#00f2fe', linewidth=4, zorder=4, label=f'Fiber {i+1} Core' if i==0 else "")
+        # Core: the printed, tilted microlens profile for boresight-steered
+        # channels (e.g. MCF), sliced from the same 3D dome used in Tab 1 —
+        # or the plain flat core line for a bare fiber.
+        boresight = f.get('boresight')
+        if boresight is not None:
+            X_d, _, Z_d = lens_dome_mesh((f['x'], 0.0, z_fiber), -np.asarray(boresight),
+                                        radius=r_c, height=r_c * 0.35, n_phi=3, n_rho=8)
+            prof_x = np.concatenate([X_d[1][::-1], X_d[0][1:]])
+            prof_z = np.concatenate([Z_d[1][::-1], Z_d[0][1:]])
+            ax.plot(prof_x, prof_z, color='#ffbe3c', linewidth=2.5, zorder=4,
+                   label=f'Fiber {i+1} Lens (printed)' if i == 0 else "")
+            ax.fill_between(prof_x, z_fiber, prof_z, color='#ffbe3c', alpha=0.2, zorder=3)
+        else:
+            ax.plot([f['x'] - r_c, f['x'] + r_c], [z_fiber, z_fiber], color='#00f2fe', linewidth=4, zorder=4, label=f'Fiber {i+1} Core' if i==0 else "")
         # Cladding line
         ax.plot([f['x'] - r_cl, f['x'] - r_c], [z_fiber, z_fiber], color='#888888', linewidth=2, zorder=3, label=f'Cladding' if i==0 else "")
         ax.plot([f['x'] + r_c, f['x'] + r_cl], [z_fiber, z_fiber], color='#888888', linewidth=2, zorder=3)
-        
+
         # Render a shaded rectangle for fiber body
         rect_clad = plt.Rectangle((f['x'] - r_cl, z_fiber), f['d_clad'], 15.0, facecolor='grey', alpha=0.1, edgecolor='none')
         rect_core = plt.Rectangle((f['x'] - r_c, z_fiber), f['d_core'], 15.0, facecolor='#00f2fe', alpha=0.08, edgecolor='none')
@@ -1084,33 +866,27 @@ with tab3:
     
     n_draw_r = min(num_vis_rays, num_rays)
     draw_r_ids = np.random.choice(num_rays, n_draw_r, replace=False)
-    
-    any_collected = np.zeros_like(X_f, dtype=bool)
-    for f_stat in sim_results['fiber_stats']:
-        any_collected |= f_stat['collected_mask']
-        
+
+    # Batch segments into LineCollections instead of one ax.plot per ray.
+    dia_segs, tir_segs, col_segs, unc_segs = [], [], [], []
     for em_idx in draw_em_ids:
         em_pos = emitters[em_idx]
-        
         for r_idx in draw_r_ids:
             x_i = X_int[em_idx, r_idx]
-            
-            # Inside diamond segment (Source -> Interface)
-            ax.plot([em_pos[0], x_i], [em_pos[2], 0.0], color='#ff7f50', alpha=0.15, linewidth=0.8)
-            
-            # Outside diamond segment
+            dia_segs.append([(em_pos[0], em_pos[2]), (x_i, 0.0)])
             if tir_mask[em_idx, r_idx]:
-                # TIR reflected ray segment (stops at diamond surface for clean visual, or short bounce)
                 v_in = V0[r_idx]
-                ax.plot([x_i, x_i + 2.0 * v_in[0]], [0.0, -2.0 * v_in[2]], color='#555555', alpha=0.08, linewidth=0.6)
+                tir_segs.append([(x_i, 0.0), (x_i + 2.0 * v_in[0], -2.0 * v_in[2])])
+            elif any_collected[em_idx, r_idx]:
+                col_segs.append([(x_i, 0.0), (X_f[em_idx, r_idx], z_fiber)])
             else:
-                x_f = X_f[em_idx, r_idx]
-                is_coll = any_collected[em_idx, r_idx]
-                color = '#00ff64' if is_coll else '#ff3232'
-                alpha = 0.35 if is_coll else 0.08
-                width = 1.2 if is_coll else 0.7
-                ax.plot([x_i, x_f], [0.0, z_fiber], color=color, alpha=alpha, linewidth=width)
-                
+                unc_segs.append([(x_i, 0.0), (X_f[em_idx, r_idx], z_fiber)])
+
+    ax.add_collection(LineCollection(dia_segs, colors='#ff7f50', alpha=0.15, linewidths=0.8))
+    ax.add_collection(LineCollection(tir_segs, colors='#555555', alpha=0.08, linewidths=0.6))
+    ax.add_collection(LineCollection(unc_segs, colors='#ff3232', alpha=0.08, linewidths=0.7))
+    ax.add_collection(LineCollection(col_segs, colors='#00ff64', alpha=0.35, linewidths=1.2))
+
     # Labels & Limits
     ax.set_xlabel('X Offset (µm)', color='white')
     ax.set_ylabel('Z Depth / Height (µm)', color='white')
@@ -1144,148 +920,57 @@ with tab4:
         num_sweep_pts = st.slider("Number of Sweep Points (X)", min_value=10, max_value=150, value=60, step=5)
         
         x_offsets_sweep = np.linspace(-sweep_range, sweep_range, num_sweep_pts)
-        
-        # Optimize sweep: propagate rays once (already done in sim_results)
-        # We only need to check which rays fall within the fibers for each offset.
+
+        # Rays were already propagated once (sim_results); a lateral fiber shift
+        # by dx is equivalent to shifting the facet intersections by -dx. A
+        # tilted (e.g. MCF) fiber's boresight is a fixed property of the lens
+        # and doesn't change under this rigid lateral shift.
         X_f = sim_results['X_f']
         Y_f = sim_results['Y_f']
+        V1 = sim_results['V1']
         sin2_sq = (n_dia_rep / n_med)**2 * (1.0 - V0[np.newaxis, :, 2]**2)
         tir_mask = sim_results['tir_mask']
         W = sim_results['weights']
-        
-        # Storage for curves
+
         sweep_effs = np.zeros((num_fibers, num_sweep_pts))
-        
         for p_idx, dx in enumerate(x_offsets_sweep):
-            for f_idx, f in enumerate(fibers):
-                r_core = f['d_core'] / 2.0
-                na = f['na']
-                
-                # Fiber center is shifted by dx
-                shifted_x = f['x'] + dx
+            sweep_effs[:, p_idx] = sweep_efficiency(
+                X_f - dx, Y_f, fibers, V1, sin2_sq, tir_mask, W,
+                coupling_model, lam_rep, n_med, num_rays)
 
-                # Check intersections
-                dist_sq = (X_f - shifted_x)**2 + (Y_f - f['y'])**2
-                if coupling_model == MODE_OVERLAP_MODEL:
-                    _, _, w0_s, na_mode_s = fiber_mode_params(f['d_core'], na, lam_rep, n_med)
-                else:
-                    w0_s, na_mode_s = 0.0, 0.0
-                coupling = compute_coupling(dist_sq, sin2_sq, tir_mask, r_core, na, n_med,
-                                            coupling_model, w0_s, na_mode_s)
+        plot_sweep(x_offsets_sweep, sweep_effs, num_fibers,
+                   "Collection Efficiency vs. Lateral Offset",
+                   "Lateral Misalignment ΔX (µm)")
 
-                # Compute average efficiency for this fiber
-                effs = 0.5 * np.sum(W * coupling, axis=1) / num_rays
-                sweep_effs[f_idx, p_idx] = np.mean(effs)
-                
-        # Combined trace
-        combined_eff = np.sum(sweep_effs, axis=0)
-        
-        # Plot curves using Plotly
-        fig_sweep = go.Figure()
-        
-        for f_idx in range(num_fibers):
-            fig_sweep.add_trace(go.Scatter(
-                x=x_offsets_sweep,
-                y=sweep_effs[f_idx] * 100,
-                mode='lines',
-                name=f"Fiber {f_idx+1}",
-                line=dict(width=2)
-            ))
-            
-        if num_fibers > 1:
-            fig_sweep.add_trace(go.Scatter(
-                x=x_offsets_sweep,
-                y=combined_eff * 100,
-                mode='lines+markers',
-                name="Combined Bundle",
-                line=dict(color='#00ffcc', width=3, dash='dash')
-            ))
-            
-        fig_sweep.update_layout(
-            template="plotly_dark",
-            title="Collection Efficiency vs. Lateral Offset",
-            xaxis=dict(title="Lateral Misalignment ΔX (µm)", gridcolor='#222222'),
-            yaxis=dict(title="Collection Efficiency (%)", gridcolor='#222222'),
-            height=500
-        )
-        st.plotly_chart(fig_sweep, use_container_width=True)
-        
     else: # Z Axis Sweep
         st.write("Sweeping the air gap distance ($Z_{fiber}$) between the diamond surface and the fiber plane.")
         
-        z_max_sweep = st.slider("Max Z Sweep Distance [µm]", min_value=1.0, max_value=250.0, value=60.0, step=5.0)
-        num_sweep_pts = st.slider("Number of Sweep Points (Z)", min_value=10, max_value=100, value=40, step=5)
+        z_max_sweep = st.slider("Max Z Sweep Distance [µm]", min_value=0.0, max_value=500.0, value=500.0, step=5.0,
+                               help="For MCF, sweeps the lens-to-diamond standoff to find the convergence sweet spot.")
+        num_sweep_pts = st.slider("Number of Sweep Points (Z)", min_value=10, max_value=150, value=60, step=5)
         
         z_offsets_sweep = np.linspace(0.0, z_max_sweep, num_sweep_pts) # Supports 0 air gap
-        
-        # For Z sweep, we must re-calculate the facet intersections for each Z step
+
+        # For a Z sweep the facet intersections must be re-propagated each step.
         X_int = sim_results['X_int']
         Y_int = sim_results['Y_int']
         V1 = sim_results['V1']
         sin2_sq = (n_dia_rep / n_med)**2 * (1.0 - V0[np.newaxis, :, 2]**2)
         tir_mask = sim_results['tir_mask']
         W = sim_results['weights']
-        
-        # Precompute denominator to avoid divide-by-zeros
-        denom = np.where(V1[:, :, 2] > 0, V1[:, :, 2], 1.0)
-        
-        # Storage
+        denom = np.where(V1[:, :, 2] > 0, V1[:, :, 2], 1.0)  # avoid divide-by-zero
+
         sweep_effs = np.zeros((num_fibers, num_sweep_pts))
-        
         for p_idx, z_val in enumerate(z_offsets_sweep):
-            # Calculate coordinates at new Z plane
             X_f_new = X_int + z_val * V1[:, :, 0] / denom
             Y_f_new = Y_int + z_val * V1[:, :, 1] / denom
-            
-            for f_idx, f in enumerate(fibers):
-                r_core = f['d_core'] / 2.0
-                na = f['na']
-                
-                # Check intersections
-                dist_sq = (X_f_new - f['x'])**2 + (Y_f_new - f['y'])**2
-                if coupling_model == MODE_OVERLAP_MODEL:
-                    _, _, w0_s, na_mode_s = fiber_mode_params(f['d_core'], na, lam_rep, n_med)
-                else:
-                    w0_s, na_mode_s = 0.0, 0.0
-                coupling = compute_coupling(dist_sq, sin2_sq, tir_mask, r_core, na, n_med,
-                                            coupling_model, w0_s, na_mode_s)
+            sweep_effs[:, p_idx] = sweep_efficiency(
+                X_f_new, Y_f_new, fibers, V1, sin2_sq, tir_mask, W,
+                coupling_model, lam_rep, n_med, num_rays)
 
-                # Compute average efficiency
-                effs = 0.5 * np.sum(W * coupling, axis=1) / num_rays
-                sweep_effs[f_idx, p_idx] = np.mean(effs)
-                
-        # Combined trace
-        combined_eff = np.sum(sweep_effs, axis=0)
-        
-        # Plot
-        fig_sweep = go.Figure()
-        
-        for f_idx in range(num_fibers):
-            fig_sweep.add_trace(go.Scatter(
-                x=z_offsets_sweep,
-                y=sweep_effs[f_idx] * 100,
-                mode='lines',
-                name=f"Fiber {f_idx+1}",
-                line=dict(width=2)
-            ))
-            
-        if num_fibers > 1:
-            fig_sweep.add_trace(go.Scatter(
-                x=z_offsets_sweep,
-                y=combined_eff * 100,
-                mode='lines+markers',
-                name="Combined Bundle",
-                line=dict(color='#00ffcc', width=3, dash='dash')
-            ))
-            
-        fig_sweep.update_layout(
-            template="plotly_dark",
-            title="Collection Efficiency vs. Air Gap (Z)",
-            xaxis=dict(title="Air Gap Distance Z (µm)", gridcolor='#222222'),
-            yaxis=dict(title="Collection Efficiency (%)", gridcolor='#222222'),
-            height=500
-        )
-        st.plotly_chart(fig_sweep, use_container_width=True)
+        plot_sweep(z_offsets_sweep, sweep_effs, num_fibers,
+                   "Collection Efficiency vs. Air Gap (Z)",
+                   "Air Gap Distance Z (µm)")
 
 # -----------------------------------------------
 # TAB 5: SPECTRAL RESPONSE
@@ -1323,7 +1008,7 @@ with tab5:
                              xaxis_title="Wavelength λ (nm)")
         fig_sp.update_yaxes(title_text="S(λ) (normalized)", secondary_y=False, gridcolor='#222222')
         fig_sp.update_yaxes(title_text="Collection Efficiency η(λ) [%]", secondary_y=True)
-        st.plotly_chart(fig_sp, use_container_width=True)
+        st.plotly_chart(fig_sp, width='stretch')
 
         # Diamond dispersion n(λ)
         fig_n = go.Figure()
@@ -1335,7 +1020,7 @@ with tab5:
                             margin=dict(l=40, r=40, b=40, t=30),
                             xaxis=dict(title="Wavelength λ (nm)", gridcolor='#222222'),
                             yaxis=dict(title="Diamond Refractive Index n(λ)", gridcolor='#222222'))
-        st.plotly_chart(fig_n, use_container_width=True)
+        st.plotly_chart(fig_n, width='stretch')
 
         st.caption(
             f"Spectrally-averaged geometric η = {total_eff*100:.3f}%   ·   "
