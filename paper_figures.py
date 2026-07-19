@@ -92,7 +92,8 @@ E_PHOT_RED = 6.62607015e-34 * 2.99792458e8 / (LAM_RED * 1e-9)   # J
 
 # ensemble & Monte Carlo
 PPM        = 3.0
-RHO        = PPM * 1.76e5            # NV/um^3
+DIAMOND_ATOM_DENSITY = 1.76e11       # carbon sites/um^3
+RHO        = PPM * 1e-6 * DIAMOND_ATOM_DENSITY  # 5.28e5 NV/um^3
 N_EMIT     = 600                     # importance-sampled emitters
 # The tracer keeps several (n_emitters, n_rays) arrays plus a 3-vector array.
 # 0.75 M ray pairs gives a reproducible workstation-safe peak memory use.
@@ -111,7 +112,8 @@ MCF_GREEN_LENS_HEIGHT = 194.041       # spreadsheet, central-lens IP-S thickness
 MCF_DESIGN_N_DIA = 2.4093             # spreadsheet, diamond index at 650 nm
 MCF_IPS_N = 1.52
 MCF_SIO2_N = 1.4565
-MCF_MODE_W = 10.0 / 2.0               # user-specified MCF MFD (um)
+MCF_MFD = 10.0                         # every MCF core, including the central core (um)
+MCF_MODE_W = MCF_MFD / 2.0             # Gaussian 1/e^2 mode radius (um)
 MCF_SIDE_TIP_OFFSET = MCF_GREEN_LENS_HEIGHT - MCF_RED_LENS_HEIGHT  # 35.225 um
 # Quadratic fit to the STL outer surface in each lens's radial/tangential frame.
 # The overlapping caps are one polymer union; this is its local external surface.
@@ -120,6 +122,7 @@ MCF_R_RADIAL, MCF_R_TANGENTIAL = 18.0, 95.0
 MCF_CENTRAL_R = 74.91
 MCF_CENTRAL_MODE_W = MCF_MODE_W
 MCF_GREEN_LENS_T = 1.0 - ((MCF_IPS_N - N_MED) / (MCF_IPS_N + N_MED)) ** 2
+EXPERIMENT_NOTE = "Independent experiment (photon counts; not fitted): SM = MCF; MM = 20 x SM"
 
 def t_face(n_guide):                 # fiber entrance Fresnel (red, normal incidence)
     return 1.0 - ((n_guide - N_MED) / (n_guide + N_MED)) ** 2
@@ -625,6 +628,8 @@ def fig6_efficiency_comparison(results):
     ax_r.set_xlabel("Fiber-diamond gap $g$ ($\\mu$m)")
     ax_r.set_ylabel("Efficiency ratio")
     ax_r.legend(fontsize=8.0, ncol=3)
+    fig.subplots_adjust(bottom=0.16)
+    fig.text(0.5, 0.025, EXPERIMENT_NOTE, ha="center", fontsize=7.8, color=INK2)
     save(fig, "fig6_collection_efficiency_comparison")
 
 
@@ -1028,6 +1033,7 @@ if __name__ == "__main__":
         print(f"  {label:>3}: {100.0*r['etaE'][k]:.6g}% at g={GAPS[k]:.0f} um; "
               f"{r['etaE'][k]/sm:.6g}x SM at the same gap")
     print(f"Same-gap pairwise values: {comparison_csv}")
+    print(f"\n{EXPERIMENT_NOTE}")
     print("\nNotes: fixed-aim MCF uses the supplied STL/GWL geometry: 17.5 um side-lens radius,"
           "\n35.225 um central-to-side tip offset, IP-S n=1.52 and 10 um MFD; re-aimed MCF"
           "\nrecalculates the side-core boresights at every gap for the 85 um NV layer."
