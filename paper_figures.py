@@ -42,6 +42,7 @@ import csv
 import os
 import struct
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import matplotlib
@@ -96,6 +97,7 @@ N_EMIT     = 600                     # importance-sampled emitters
 # The tracer keeps several (n_emitters, n_rays) arrays plus a 3-vector array.
 # 0.75 M ray pairs gives a reproducible workstation-safe peak memory use.
 RAY_BUDGET = 750_000                 # max emitter-ray pairs per tracer call
+SWEEP_WORKERS = min(4, os.cpu_count() or 1)  # gaps are independent; arrays are read-only
 
 # MCF as-built: dimensions and surface curvature measured from the supplied
 # Side lenses.STL + Central lens.STL, registered by Cylinder_lenses_job.gwl.
@@ -471,26 +473,29 @@ def run_sweeps():
         r_em = np.hypot(em[:, 0], em[:, 1])
         order = np.argsort(r_em)
 
-        eta1 = np.zeros_like(GAPS); rate1 = np.zeros_like(GAPS)
-        etaE = np.zeros_like(GAPS); powE = np.zeros_like(GAPS); a50 = np.zeros_like(GAPS)
-        for k, g in enumerate(GAPS):
+        def one_gap(item):
+            _, g = item
             fibs = cfg['fibers'](g)
-            eta1[k] = cfg['tf'] * eta_per_emitter(single, V0_1, W0_1, fibs, g, cfg['model'])[0]
+            eta1 = cfg['tf'] * eta_per_emitter(single, V0_1, W0_1, fibs, g, cfg['model'])[0]
             R1, s1 = exc_rate(cfg['exc'], 0.0, 0.0, -NV_DEPTH, g)
-            rate1[k] = R1 * eta1[k]
+            rate1 = R1 * eta1
 
             eta_i = eta_per_emitter(em, V0_e, W0_e, fibs, g, cfg['model'])
             Ri, sE = exc_rate(cfg['exc'], em[:, 0], em[:, 1], em[:, 2], g)
             u = Ri * eta_i * dens                     # signal carried per sample
-            etaE[k] = cfg['tf'] * u.sum() / (Ri * dens).sum()
-            powE[k] = u.mean() * cfg['tf'] * E_PHOT_RED * 1e9     # nW
+            etaE = cfg['tf'] * u.sum() / (Ri * dens).sum()
+            powE = u.mean() * cfg['tf'] * E_PHOT_RED * 1e9        # nW
             cu = np.cumsum(u[order])
             # A50 is the on-axis circular area on the NV layer containing
             # half the excitation x collection weighted ensemble signal.
             # This definition remains meaningful for the MCF's six lobes.
             r50 = r_em[order][np.searchsorted(cu, 0.5 * cu[-1])] if cu[-1] > 0 else np.nan
-            a50[k] = np.pi * r50 * r50
-            s_max_seen = max(s_max_seen, s1, sE)
+            return eta1, rate1, etaE, powE, np.pi * r50 * r50, max(s1, sE)
+
+        with ThreadPoolExecutor(max_workers=SWEEP_WORKERS) as pool:
+            rows = np.asarray(list(pool.map(one_gap, enumerate(GAPS))))
+        eta1, rate1, etaE, powE, a50, s_seen = rows.T
+        s_max_seen = max(s_max_seen, np.max(s_seen))
 
         out[cfg['name']] = dict(cfg=cfg, eta1=eta1, rate1=rate1,
                                 etaE=etaE, powE=powE, a50=a50,
