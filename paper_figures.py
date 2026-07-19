@@ -38,6 +38,7 @@ Model (shared Monte-Carlo ray tracer in physics.py, same as the app):
   * Distance and resolution sweeps run at a representative 700 nm; the full
     spectral dependence is figure 2. Fixed seeds; fully reproducible.
 """
+import csv
 import os
 import struct
 import time
@@ -66,9 +67,11 @@ def bisect(f, lo, hi, iters=80):
     return 0.5 * (lo + hi)
 
 # ============================== constants ==============================
-# geometry (um)
-NV_DEPTH   = 85.0                    # layer centre below the facing surface
-NV_WIDTH   = 10.0                    # layer spans 80-90 um
+# geometry (um).  The facing diamond surface is z=0, so depth is negative z.
+NV_Z_MIN   = -90.0                   # deepest edge of the 3D NV layer
+NV_Z_MAX   = -80.0                   # shallowest edge of the 3D NV layer
+NV_DEPTH   = -0.5 * (NV_Z_MIN + NV_Z_MAX)
+NV_WIDTH   = NV_Z_MAX - NV_Z_MIN
 GAPS       = np.linspace(0.0, 200.0, 21)
 N_MED      = 1.0                     # air gap
 
@@ -342,7 +345,7 @@ def sample_ensemble(cfg, n, rng):
     m = comp == 2
     x[m] = rng.uniform(-L, L, m.sum())
     y[m] = rng.uniform(-L, L, m.sum())
-    z = rng.uniform(-NV_DEPTH - NV_WIDTH / 2.0, -NV_DEPTH + NV_WIDTH / 2.0, n)
+    z = rng.uniform(NV_Z_MIN, NV_Z_MAX, n)
 
     def gauss2(sig):
         return np.exp(-(x * x + y * y) / (2.0 * sig * sig)) / (2.0 * np.pi * sig * sig)
@@ -581,6 +584,68 @@ def fig3(results):
     ax.set_ylabel("50%-signal collection area $A_{50}$ ($\\mu$m$^2$)")
     ax.legend(fontsize=8.5)
     save(fig, "fig3_resolution_vs_gap")
+
+
+def fig6_efficiency_comparison(results):
+    """Direct, same-gap comparison of the three physical fiber probes."""
+    probes = (("SM", "SM"), ("MM", "MM"), ("MCF", "MCF fixed aim"))
+    fig, (ax, ax_r) = plt.subplots(
+        2, 1, figsize=(5.4, 5.0), sharex=True,
+        gridspec_kw=dict(height_ratios=[2.2, 1.5], hspace=0.12))
+
+    eta = {}
+    for label, name in probes:
+        r = results[name]
+        eta[label] = np.asarray(r['etaE'])
+        st = style(r['cfg'])
+        st['label'] = label
+        ax.plot(GAPS, 100.0 * eta[label], **st)
+    ax.set_yscale("log")
+    ax.set_ylabel("3D-ensemble $\\bar\\eta$ (%)")
+    ax.set_title("3 ppm NV layer, $z=-90$ to $-80$ $\\mu$m",
+                 fontsize=9.5, loc="left", color=INK2)
+    ax.legend(fontsize=8.5, ncol=3)
+
+    pairs = (("MM", "SM", "#1baf7a", "-"),
+             ("MCF", "SM", "#d78500", "-"),
+             ("MCF", "MM", "#d78500", "--"))
+    for numerator, denominator, color, ls in pairs:
+        ratio = np.divide(eta[numerator], eta[denominator],
+                          out=np.full_like(eta[numerator], np.nan),
+                          where=eta[denominator] > 0.0)
+        ax_r.plot(GAPS, ratio, color=color, ls=ls, marker="o", markersize=3.8,
+                  markevery=2, label=f"{numerator} / {denominator}")
+    ax_r.axhline(1.0, color=INK2, lw=0.8)
+    ax_r.set_yscale("log")
+    ax_r.set_xlabel("Fiber-diamond gap $g$ ($\\mu$m)")
+    ax_r.set_ylabel("Efficiency ratio")
+    ax_r.legend(fontsize=8.0, ncol=3)
+    save(fig, "fig6_collection_efficiency_comparison")
+
+
+def write_efficiency_comparison(results):
+    """Write every same-gap efficiency, pairwise difference, and ratio."""
+    probes = (("SM", "SM"), ("MM", "MM"), ("MCF", "MCF fixed aim"))
+    eta = {label: 100.0 * np.asarray(results[name]['etaE'])
+           for label, name in probes}
+    pairs = (("MM", "SM"), ("MCF", "SM"), ("MCF", "MM"))
+    fields = (["gap_um"] + [f"{label}_eta_percent" for label, _ in probes]
+              + [f"{a}_minus_{b}_percentage_points" for a, b in pairs]
+              + [f"{a}_over_{b}" for a, b in pairs])
+    path = os.path.join(OUT, "ensemble_collection_efficiency_comparison.csv")
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fields)
+        writer.writeheader()
+        for k, gap in enumerate(GAPS):
+            row = {"gap_um": f"{gap:.6g}"}
+            row.update({f"{label}_eta_percent": f"{values[k]:.9g}"
+                        for label, values in eta.items()})
+            row.update({f"{a}_minus_{b}_percentage_points": f"{eta[a][k] - eta[b][k]:.9g}"
+                        for a, b in pairs})
+            row.update({f"{a}_over_{b}": f"{eta[a][k] / eta[b][k]:.9g}"
+                        if eta[b][k] > 0.0 else "nan" for a, b in pairs})
+            writer.writerow(row)
+    return path
 
 
 def mcf_display_paths(g, n_rays=4001):
@@ -937,6 +1002,8 @@ if __name__ == "__main__":
     fig3(results)
     fig4_mcf_ray_trace(results)
     fig4_mcf_interactive(results)
+    fig6_efficiency_comparison(results)
+    comparison_csv = write_efficiency_comparison(results)
 
     print(f"\nfigures written to {OUT}  ({time.time()-t0:.0f} s)")
     print(f"max saturation parameter s = I/I_sat encountered: {s_max:.2e}"
@@ -948,6 +1015,14 @@ if __name__ == "__main__":
         k = int(np.argmax(r['eta1']))
         print(f"{name:>14} | {r['g_opt']:7.0f} | {r['eta1'][k]*100:10.4f} | "
               f"{r['rate1'][k]*1e-3:12.5f} | {r['powE'][k]:10.3f} | {r['a50'][k]:12.1f}")
+    print("\n3D 3 ppm ensemble collection-efficiency maxima (physical probes):")
+    for label, name in (("SM", "SM"), ("MM", "MM"), ("MCF", "MCF fixed aim")):
+        r = results[name]
+        k = int(np.argmax(r['etaE']))
+        sm = results['SM']['etaE'][k]
+        print(f"  {label:>3}: {100.0*r['etaE'][k]:.6g}% at g={GAPS[k]:.0f} um; "
+              f"{r['etaE'][k]/sm:.6g}x SM at the same gap")
+    print(f"Same-gap pairwise values: {comparison_csv}")
     print("\nNotes: fixed-aim MCF uses the supplied STL/GWL geometry: 17.5 um side-lens radius,"
           "\n35.225 um central-to-side tip offset, IP-S n=1.52 and 10 um MFD; re-aimed MCF"
           "\nrecalculates the side-core boresights at every gap for the 85 um NV layer."
