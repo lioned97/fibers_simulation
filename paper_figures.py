@@ -39,12 +39,14 @@ Model (shared Monte-Carlo ray tracer in physics.py, same as the app):
     spectral dependence is figure 2. Fixed seeds; fully reproducible.
 """
 import os
+import struct
 import time
 
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 from physics import (
     diamond_sellmeier, nv_emission_spectrum,
@@ -92,18 +94,27 @@ N_EMIT     = 600                     # importance-sampled emitters
 # 0.75 M ray pairs gives a reproducible workstation-safe peak memory use.
 RAY_BUDGET = 750_000                 # max emitter-ray pairs per tracer call
 
-# MCF as-built: Shukhin et al. (OMN 2024), refined with microlens.xlsx,
-# orange/650-nm row.  The spreadsheet explicitly gives x=16.8434 um rather
-# than the rounded 18 um decenter quoted in the paper.  The lens is represented
-# as its measured/design effective pupil--the unpublished sag is not invented.
+# MCF as-built: dimensions and surface curvature measured from the supplied
+# Side lenses.STL + Central lens.STL, registered by Cylinder_lenses_job.gwl.
 PITCH = 35.0                          # physical side-core radius (um)
-LENS_R = 16.8434                      # side-lens pupil radius (um)
+LENS_R = 17.5                          # six side-lens vertices from STL (um)
 W0_LENS = PITCH / 2.0                 # pupil-filling Gaussian 1/e^2 radius
 MCF_RED_FREE_AIR = 141.185            # spreadsheet, 650 nm red design (um)
 MCF_TARGET_DEPTH = 30.0               # spreadsheet, target below diamond face (um)
 MCF_RED_LENS_HEIGHT = 158.815         # spreadsheet, side-lens IP-S thickness (um)
 MCF_GREEN_LENS_HEIGHT = 194.041       # spreadsheet, central-lens IP-S thickness (um)
 MCF_DESIGN_N_DIA = 2.4093             # spreadsheet, diamond index at 650 nm
+MCF_IPS_N = 1.52
+MCF_SIO2_N = 1.4565
+MCF_MODE_W = 10.0 / 2.0               # user-specified MCF MFD (um)
+MCF_SIDE_TIP_OFFSET = MCF_GREEN_LENS_HEIGHT - MCF_RED_LENS_HEIGHT  # 35.225 um
+# Quadratic fit to the STL outer surface in each lens's radial/tangential frame.
+# The overlapping caps are one polymer union; this is its local external surface.
+MCF_R_RADIAL, MCF_R_TANGENTIAL = 18.0, 95.0
+# Central lens: axisymmetric quadratic fit to Central lens.STL.
+MCF_CENTRAL_R = 74.91
+MCF_CENTRAL_MODE_W = MCF_MODE_W
+MCF_GREEN_LENS_T = 1.0 - ((MCF_IPS_N - N_MED) / (MCF_IPS_N + N_MED)) ** 2
 
 def t_face(n_guide):                 # fiber entrance Fresnel (red, normal incidence)
     return 1.0 - ((n_guide - N_MED) / (n_guide + N_MED)) ** 2
@@ -121,6 +132,58 @@ def mcf_fixed_air_angle():
 MCF_FIXED_AIR_ANGLE = mcf_fixed_air_angle()
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "figures")
+# The supplied STL/GWL files are normally kept beside the user's Downloads.
+# Override this when the paper script is moved to another machine.
+MCF_ASSET_DIR = os.environ.get("MCF_ASSET_DIR",
+                               os.path.join(os.path.expanduser("~"), "Downloads"))
+
+
+def read_binary_stl(path, max_faces=10000):
+    """Read a binary STL into triangle vertices, or return None if unavailable."""
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read()
+        n = struct.unpack_from("<I", data, 80)[0]
+        if n <= 0 or 84 + 50 * n > len(data):
+            return None
+        dtype = np.dtype([("normal", "<f4", (3,)),
+                          ("vertices", "<f4", (3, 3)), ("attribute", "<u2")])
+        tri = np.frombuffer(data, dtype=dtype, offset=84, count=n)["vertices"].copy()
+    except (OSError, struct.error, ValueError):
+        return None
+    if not np.all(np.isfinite(tri)):
+        return None
+    if len(tri) > max_faces:
+        tri = tri[np.linspace(0, len(tri) - 1, max_faces, dtype=int)]
+    return tri
+
+
+def mcf_printed_meshes(g):
+    """Return the three actually-written STL parts in optical plot coordinates.
+
+    STL/GWL uses the build axis as Y and the diamond-facing tip as the high-Y
+    end.  The optical model measures distance outward from the diamond, so the
+    plotted vertical coordinate is ``g + 194.041 - Y_STL``.  Each lens STL is
+    centred from its own bounding box; this registers the central lens with
+    the central core and the six side lenses with the 35-um-pitch fibre.
+    """
+    specs = (("Cylinder.STL", "cylinder", "#7b8790", "printed cylinder/pedestal"),
+             ("Side lenses.STL", "side", "#d78500", "six side microlenses"),
+             ("Central lens.STL", "central", "#1baf7a", "raised central microlens"))
+    meshes = []
+    for filename, kind, color, label in specs:
+        tri = read_binary_stl(os.path.join(MCF_ASSET_DIR, filename))
+        if tri is None:
+            continue
+        flat = tri.reshape(-1, 3)
+        cx = 0.5 * (flat[:, 0].min() + flat[:, 0].max())
+        cy = 0.5 * (flat[:, 2].min() + flat[:, 2].max())
+        plot_tri = np.empty_like(tri, dtype=float)
+        plot_tri[:, :, 0] = tri[:, :, 0] - cx
+        plot_tri[:, :, 1] = tri[:, :, 2] - cy
+        plot_tri[:, :, 2] = g + MCF_GREEN_LENS_HEIGHT - tri[:, :, 1]
+        meshes.append((kind, plot_tri, color, label))
+    return meshes
 
 # =========================== fiber configs =============================
 def mcf_fibers(g, reaim):
@@ -131,14 +194,17 @@ def mcf_fibers(g, reaim):
         if reaim:
             # exact Snell aim at the NV-layer centre: solve exit angle in diamond
             f = lambda t: (NV_DEPTH * np.tan(t)
-                           + g * np.tan(np.arcsin(N_DIA_RED * np.sin(t))) - LENS_R)
+                           + (g + MCF_SIDE_TIP_OFFSET) * np.tan(np.arcsin(N_DIA_RED * np.sin(t))) - LENS_R)
             th_d = bisect(f, 1e-9, np.arcsin(1.0 / N_DIA_RED) - 1e-6)
             th_a = np.arcsin(N_DIA_RED * np.sin(th_d))
         else:
             th_a = MCF_FIXED_AIR_ANGLE
         b = np.array([np.cos(a) * np.sin(th_a), np.sin(a) * np.sin(th_a), np.cos(th_a)])
-        fibs.append({'x': fx, 'y': fy, 'z': g, 'd_core': PITCH,
-                     'd_clad': PITCH * 1.3, 'na': 0.15, 'boresight': b, 'w0': W0_LENS})
+        fibs.append({'x': fx, 'y': fy, 'z': g + MCF_SIDE_TIP_OFFSET, 'd_core': PITCH,
+                     'd_clad': PITCH * 1.3, 'na': 0.15, 'boresight': b, 'w0': W0_LENS,
+                     'printed_lens': True, 'lens_axis': b,
+                     'lens_height': MCF_RED_LENS_HEIGHT,
+                     'lens_aperture': W0_LENS, 'mode_w': MCF_MODE_W})
     return fibs
 
 # n1 / nen are equal-solid-angle escape-cone quadrature counts for the single
@@ -159,15 +225,32 @@ CONFIGS = [
            fibers=lambda g: mcf_fibers(g, reaim=False),
            # The pupil's diffraction-limited angular width needs a finer
            # escape-cone grid than the broad SM/MM acceptances.
-           na=0.15, tf=t_face(1.51), n1=131_072, nen=65_536,
+           na=0.15, tf=1.0, n1=131_072, nen=65_536,
            color="#d78500", ls="-",  marker="^"),
     dict(name="MCF re-aimed",    exc="MCF", model=MODE_OVERLAP_MODEL,
          fibers=lambda g: mcf_fibers(g, reaim=True),
-         na=0.15, tf=t_face(1.51), n1=131_072, nen=65_536,
+         na=0.15, tf=1.0, n1=131_072, nen=65_536,
          color="#d78500", ls="--", marker="v"),
 ]
 
 # ============================ excitation ================================
+def central_lens_width(depth, gap):
+    """532-nm Gaussian propagated from the MCF core through Central lens.STL.
+
+    The lens is an axisymmetric IP-S cap (R=74.91 um) on the 194.04 um
+    central pillar.  A paraxial Gaussian-q transform captures its measured
+    curvature without inventing an unmeasured asphere between STL vertices.
+    """
+    z_r = np.pi * MCF_IPS_N * MCF_CENTRAL_MODE_W ** 2 / (LAM_GREEN * 1e-3)
+    q_ips = MCF_GREEN_LENS_HEIGHT + 1j * z_r
+    # The convex IP-S-to-air exit surface is positive power when traversed
+    # from the central fibre core toward the diamond.
+    f_air = -MCF_CENTRAL_R / (MCF_IPS_N - N_MED)
+    q_air = 1.0 / (1.0 / q_ips - 1.0 / f_air)
+    q_dia = N_DIA_GREEN * (q_air + gap) + np.asarray(depth, dtype=float)
+    inv_q = 1.0 / q_dia
+    return np.sqrt(-LAM_GREEN * 1e-3 / (np.pi * N_DIA_GREEN * np.imag(inv_q)))
+
 def exc_width(profile, d, g):
     """Excitation radius at depth d for gap g: Gaussian 1/e^2 w, or top-hat R (MM)."""
     if profile == "MM":
@@ -176,13 +259,8 @@ def exc_width(profile, d, g):
         return 25.0 + g * np.tan(th_a) + d * np.tan(th_d)
     if profile == "SM":
         w0, th_a = 2.0, np.arcsin(0.12)
-    else:                                    # MCF central core, collimated
-        # Gaussian propagation: z_R = pi*n*w0^2/lambda.  The central core is
-        # collimated by design, so only this diffraction broadening is used.
-        w0 = W0_LENS
-        z_eff = g + d / N_DIA_GREEN
-        return w0 * np.sqrt(1.0 + (LAM_GREEN * 1e-3 * z_eff
-                                    / (np.pi * w0 * w0)) ** 2)
+    else:                                    # MCF central fibre + printed central lens
+        return central_lens_width(d, g)
     th_d = np.arcsin(np.sin(th_a) / N_DIA_GREEN)
     return np.sqrt(w0 ** 2 + (g * np.tan(th_a) + d * np.tan(th_d)) ** 2)
 
@@ -191,10 +269,11 @@ def exc_rate(profile, x, y, z, g):
     d = -np.asarray(z, dtype=float)
     r2 = np.asarray(x) ** 2 + np.asarray(y) ** 2
     w = exc_width(profile, d, g)
+    power = P_GREEN_MW * (MCF_GREEN_LENS_T if profile == "MCF" else 1.0)
     if profile == "MM":                      # top-hat
-        I = np.where(r2 <= w * w, P_GREEN_MW * T_GREEN_IN / (np.pi * w * w), 0.0)
+        I = np.where(r2 <= w * w, power * T_GREEN_IN / (np.pi * w * w), 0.0)
     else:                                    # Gaussian
-        I = 2.0 * P_GREEN_MW * T_GREEN_IN / (np.pi * w * w) * np.exp(-2.0 * r2 / (w * w))
+        I = 2.0 * power * T_GREEN_IN / (np.pi * w * w) * np.exp(-2.0 * r2 / (w * w))
     s = I / I_SAT
     return R_SAT * s / (1.0 + s), float(np.max(s))
 
@@ -273,8 +352,99 @@ def sample_ensemble(cfg, n, rng):
     return np.column_stack([x, y, z]), dens
 
 # ============================ collection ================================
+def lensed_mcf_eta(emitters, V0, W0, lens, g, n_dia, lam):
+    """Trace one continuous printed IP-S union, then apply sixfold symmetry.
+
+    The cylinder, side lenses, and raised central lens are not treated as
+    separate optical elements: the nearest exposed surface wins, one
+    air-to-IP-S Fresnel transmission is applied, and the ray then remains in
+    IP-S until the silica core face.
+    """
+    g_side = g + MCF_SIDE_TIP_OFFSET
+    g_cylinder = g + MCF_GREEN_LENS_HEIGHT - 134.04
+    raw = run_ray_tracing(emitters, V0, W0, n_dia, N_MED, g, [], MODE_OVERLAP_MODEL, lam)
+    p = np.column_stack((raw['X_f'].ravel(), raw['Y_f'].ravel(), np.full(raw['X_f'].size, g)))
+    v = raw['V1'].reshape(-1, 3)
+    best_t = np.full(len(v), np.inf)
+    normal = np.zeros_like(v)
+
+    def add_cap(apex, er, et, rr, rt, footprint_u):
+        q = p - apex
+        u0, w0 = q @ er, q @ et
+        du, dw, dz = v @ er, v @ et, v[:, 2]
+        A = du * du / (2.0 * rr) + dw * dw / (2.0 * rt)
+        B = u0 * du / rr + w0 * dw / rt - dz
+        C = u0 * u0 / (2.0 * rr) + w0 * w0 / (2.0 * rt) - q[:, 2]
+        disc = B * B - 4.0 * A * C
+        t = (-B - np.sqrt(np.maximum(disc, 0.0))) / np.maximum(2.0 * A, 1e-15)
+        surf = p + t[:, None] * v
+        us, ws = (surf - apex) @ er, (surf - apex) @ et
+        valid = ((disc >= 0.0) & (t >= 0.0)
+                 & ((us - footprint_u) ** 2 + ws ** 2 <= W0_LENS ** 2))
+        take = valid & (t < best_t)
+        n = ((us / rr)[:, None] * er + (ws / rt)[:, None] * et
+             - np.array([0.0, 0.0, 1.0]))
+        n /= np.linalg.norm(n, axis=1)[:, None]
+        best_t[take] = t[take]
+        normal[take] = n[take]
+
+    add_cap(np.array([0.0, 0.0, g]), np.array([1.0, 0.0, 0.0]),
+            np.array([0.0, 1.0, 0.0]), MCF_CENTRAL_R, MCF_CENTRAL_R, 0.0)
+    for i in range(6):
+        a = i * np.pi / 3.0
+        er = np.array([np.cos(a), np.sin(a), 0.0])
+        et = np.array([-np.sin(a), np.cos(a), 0.0])
+        add_cap(LENS_R * er + np.array([0.0, 0.0, g_side]), er, et,
+                MCF_R_RADIAL, MCF_R_TANGENTIAL, PITCH - LENS_R)
+
+    # Exposed top of the common cylinder/pedestal is part of the same IP-S union.
+    t_flat = (g_cylinder - p[:, 2]) / np.maximum(v[:, 2], 1e-15)
+    flat = p + t_flat[:, None] * v
+    take = ((t_flat >= 0.0) & (flat[:, 0] ** 2 + flat[:, 1] ** 2 <= 75.0 ** 2)
+            & (t_flat < best_t))
+    best_t[take] = t_flat[take]
+    normal[take] = np.array([0.0, 0.0, -1.0])
+
+    hit = np.isfinite(best_t)
+    surf = p + np.where(hit, best_t, 0.0)[:, None] * v
+    cos_i = np.clip(-np.sum(v * normal, axis=1), 0.0, 1.0)
+    eta = N_MED / MCF_IPS_N
+    sin_t2 = eta * eta * (1.0 - cos_i * cos_i)
+    transmit = hit & (sin_t2 < 1.0)
+    cos_t = np.sqrt(np.maximum(0.0, 1.0 - sin_t2))
+    vp = eta * v + (eta * cos_i - cos_t)[:, None] * normal
+    # Average s/p Fresnel power transmission at the air-to-IP-S printed surface.
+    rs = (N_MED * cos_i - MCF_IPS_N * cos_t) / (N_MED * cos_i + MCF_IPS_N * cos_t + 1e-15)
+    rp = (MCF_IPS_N * cos_i - N_MED * cos_t) / (MCF_IPS_N * cos_i + N_MED * cos_t + 1e-15)
+    ts = 1.0 - 0.5 * (rs * rs + rp * rp)
+    target_er = np.array([lens['x'], lens['y'], 0.0]) / LENS_R
+    core = PITCH * target_er + np.array([0.0, 0.0, g + MCF_GREEN_LENS_HEIGHT])
+    dt = (core[2] - surf[:, 2]) / np.maximum(vp[:, 2], 1e-12)
+    base = surf + dt[:, None] * vp
+    miss2 = (base[:, 0] - core[0]) ** 2 + (base[:, 1] - core[1]) ** 2
+    # The side-core mode is tilted outward.  Compare the internal ray to the
+    # lens-to-core axis, not global +Z (which would reject the intended tilt).
+    core_axis = core - np.array([lens['x'], lens['y'], g_side])
+    core_axis /= np.linalg.norm(core_axis)
+    sin2 = np.maximum(0.0, 1.0 - (vp @ core_axis) ** 2)
+    na_mode = (lam * 1e-3) / (np.pi * MCF_IPS_N * lens['mode_w'])
+    mode = np.exp(-2.0 * miss2 / lens['mode_w'] ** 2)
+    mode *= np.exp(-2.0 * sin2 / na_mode ** 2)
+    w = np.broadcast_to(raw['weights'], raw['X_f'].shape).ravel() * ts * mode * transmit
+    # diamond exit, explicit air-to-IP-S lens, and IP-S-to-silica core face.
+    core_t = 1.0 - ((MCF_IPS_N - MCF_SIO2_N) / (MCF_IPS_N + MCF_SIO2_N)) ** 2
+    per = 0.5 * w.reshape(len(emitters), len(V0)).sum(axis=1) / len(V0)
+    return 6.0 * core_t * per
+
+
 def eta_per_emitter(emitters, V0, W0, fibers, g, model, lam=LAM_RED, n_dia=N_DIA_RED):
     """Collection efficiency per emitter (summed over cores), chunked for memory."""
+    if fibers and fibers[0].get('printed_lens'):
+        # The centred 3D ensemble is rotationally symmetric, so one fully
+        # traced side lens times six is the exact symmetry reduction here.
+        block = max(1, RAY_BUDGET // len(V0))
+        return np.concatenate([lensed_mcf_eta(emitters[i:i + block], V0, W0, fibers[0], g, n_dia, lam)
+                               for i in range(0, len(emitters), block)])
     block = max(1, RAY_BUDGET // len(V0))
     parts = []
     for i in range(0, len(emitters), block):
@@ -413,26 +583,156 @@ def fig3(results):
     save(fig, "fig3_resolution_vs_gap")
 
 
+def mcf_display_paths(g, n_rays=4001):
+    """Trace display rays through the first surface of the continuous print.
+
+    This is the same union-envelope/refraction convention as ``lensed_mcf_eta``
+    but returns the hit point and in-polymer direction so the interactive figure
+    can draw a continuous path through the raised central lens and side-lens body.
+    """
+    all_fibers = mcf_fibers(g, reaim=False)
+    theta_c = np.arcsin(N_MED / N_DIA_RED)
+    theta = np.linspace(-0.999 * theta_c, 0.999 * theta_c, n_rays)
+    v0 = np.column_stack((np.sin(theta), np.zeros_like(theta), np.cos(theta)))
+    raw = run_ray_tracing(np.array([[0.0, 0.0, -NV_DEPTH]]), v0,
+                          np.ones(len(v0)), N_DIA_RED, N_MED, g, [],
+                          MODE_OVERLAP_MODEL, LAM_RED)
+    x_int = raw['X_int'][0]
+    p = np.column_stack((raw['X_f'][0], raw['Y_f'][0], np.full(n_rays, g)))
+    v = raw['V1'][0]
+    best_t = np.full(n_rays, np.inf)
+    normal = np.zeros_like(v)
+
+    def add_cap(apex, er, et, rr, rt, footprint_u):
+        q = p - apex
+        u0, w0 = q @ er, q @ et
+        du, dw, dz = v @ er, v @ et, v[:, 2]
+        A = du * du / (2.0 * rr) + dw * dw / (2.0 * rt)
+        B = u0 * du / rr + w0 * dw / rt - dz
+        C = u0 * u0 / (2.0 * rr) + w0 * w0 / (2.0 * rt) - q[:, 2]
+        disc = B * B - 4.0 * A * C
+        t = (-B - np.sqrt(np.maximum(disc, 0.0))) / np.maximum(2.0 * A, 1e-15)
+        surf = p + t[:, None] * v
+        us, ws = (surf - apex) @ er, (surf - apex) @ et
+        valid = ((disc >= 0.0) & (t >= 0.0)
+                 & ((us - footprint_u) ** 2 + ws ** 2 <= W0_LENS ** 2))
+        take = valid & (t < best_t)
+        n = ((us / rr)[:, None] * er + (ws / rt)[:, None] * et
+             - np.array([0.0, 0.0, 1.0]))
+        n /= np.linalg.norm(n, axis=1)[:, None]
+        best_t[take] = t[take]
+        normal[take] = n[take]
+
+    g_side = g + MCF_SIDE_TIP_OFFSET
+    add_cap(np.array([0.0, 0.0, g]), np.array([1.0, 0.0, 0.0]),
+            np.array([0.0, 1.0, 0.0]), MCF_CENTRAL_R, MCF_CENTRAL_R, 0.0)
+    for i in range(6):
+        a = i * np.pi / 3.0
+        er = np.array([np.cos(a), np.sin(a), 0.0])
+        et = np.array([-np.sin(a), np.cos(a), 0.0])
+        add_cap(LENS_R * er + np.array([0.0, 0.0, g_side]), er, et,
+                MCF_R_RADIAL, MCF_R_TANGENTIAL, PITCH - LENS_R)
+
+    g_cylinder = g + MCF_GREEN_LENS_HEIGHT - 134.04
+    t_flat = (g_cylinder - p[:, 2]) / np.maximum(v[:, 2], 1e-15)
+    flat = p + t_flat[:, None] * v
+    take = ((t_flat >= 0.0) & (flat[:, 0] ** 2 + flat[:, 1] ** 2 <= 75.0 ** 2)
+            & (t_flat < best_t))
+    best_t[take] = t_flat[take]
+    normal[take] = np.array([0.0, 0.0, -1.0])
+
+    hit = np.isfinite(best_t)
+    surf = p + np.where(hit, best_t, 0.0)[:, None] * v
+    cos_i = np.clip(-np.sum(v * normal, axis=1), 0.0, 1.0)
+    eta = N_MED / MCF_IPS_N
+    sin_t2 = eta * eta * (1.0 - cos_i * cos_i)
+    transmit = hit & (sin_t2 < 1.0)
+    cos_t = np.sqrt(np.maximum(0.0, 1.0 - sin_t2))
+    vp = eta * v + (eta * cos_i - cos_t)[:, None] * normal
+
+    core_z = g + MCF_GREEN_LENS_HEIGHT
+    dt = (core_z - surf[:, 2]) / np.maximum(vp[:, 2], 1e-12)
+    base = surf + dt[:, None] * vp
+    na_mode = (LAM_RED * 1e-3) / (np.pi * MCF_IPS_N * MCF_MODE_W)
+    accepted_by = []
+    for core_x in (PITCH, -PITCH):
+        miss2 = (base[:, 0] - core_x) ** 2 + base[:, 1] ** 2
+        lens_x = LENS_R if core_x > 0.0 else -LENS_R
+        core_axis = np.array([core_x - lens_x, 0.0, core_z - g_side])
+        core_axis /= np.linalg.norm(core_axis)
+        sin2 = np.maximum(0.0, 1.0 - (vp @ core_axis) ** 2)
+        mode = np.exp(-2.0 * miss2 / MCF_MODE_W ** 2)
+        mode *= np.exp(-2.0 * sin2 / na_mode ** 2)
+        accepted_by.append(transmit & (mode > np.exp(-2.0)))
+    return dict(x_int=x_int, surface=surf, vp=vp, base=base, transmit=transmit,
+                accepted_by=np.column_stack(accepted_by), all_fibers=all_fibers,
+                g_side=g_side, core_z=core_z)
+
+
 def fig4_mcf_ray_trace(results):
-    """MCF geometry plus a deterministic meridional ray trace at its best gap."""
+    """Full STL print, end-face layout, and deterministic ray trace."""
     cfg = results["MCF fixed aim"]['cfg']
     g = results["MCF fixed aim"]['g_opt']
-    all_fibers = cfg['fibers'](g)
-    # The x-z slice intersects only the two opposite side lenses.  It is a
-    # ray-trace view, not a fictitious lens-sag model.
+    paths = mcf_display_paths(g)
+    g_side, core_z = paths['g_side'], paths['core_z']
+    all_fibers = paths['all_fibers']
     fibers = [all_fibers[0], all_fibers[3]]
-    theta_c = np.arcsin(N_MED / N_DIA_RED)
-    theta = np.linspace(-0.999 * theta_c, 0.999 * theta_c, 4001)
-    v0 = np.column_stack((np.sin(theta), np.zeros_like(theta), np.cos(theta)))
-    trace = run_ray_tracing(np.array([[0.0, 0.0, -NV_DEPTH]]), v0,
-                            np.ones(len(v0)), N_DIA_RED, N_MED, g, fibers,
-                            MODE_OVERLAP_MODEL, LAM_RED)
-    accepted_by = np.vstack([s['collected_mask'][0] for s in trace['fiber_stats']])
+    accepted_by = paths['accepted_by'].T
     accepted = np.any(accepted_by, axis=0)
-    x_int, x_f = trace['X_int'][0], trace['X_f'][0]
+    x_int, surface = paths['x_int'], paths['surface']
 
-    fig, (ax_top, ax) = plt.subplots(1, 2, figsize=(8.0, 3.7),
-                                     gridspec_kw=dict(width_ratios=[0.82, 1.48]))
+    fig = plt.figure(figsize=(11.2, 4.35))
+    gs = fig.add_gridspec(1, 3, width_ratios=[1.24, 0.82, 1.55], wspace=0.30)
+    ax_3d = fig.add_subplot(gs[0, 0], projection="3d")
+    ax_top = fig.add_subplot(gs[0, 1])
+    ax = fig.add_subplot(gs[0, 2])
+
+    # Full printed assembly from the supplied binary STL files.  The common
+    # cylinder/pedestal and both lens STLs are shown; Ring.STL is intentionally
+    # absent because Cylinder_lenses_job.gwl comments out Ring_data.gwl.
+    meshes = mcf_printed_meshes(g)
+    for kind, tri, color, label in meshes:
+        ax_3d.add_collection3d(Poly3DCollection(
+            tri, facecolor=color, edgecolor="#4d4d4d", linewidth=0.08,
+            alpha=0.26 if kind == "cylinder" else 0.58, label=label))
+    if meshes:
+        ax_3d.set_xlim(-82, 82)
+        ax_3d.set_ylim(-82, 82)
+        ax_3d.set_zlim(-NV_DEPTH - 8, g + MCF_GREEN_LENS_HEIGHT + 8)
+    xx, yy = np.meshgrid(np.array([-75.0, 75.0]), np.array([-75.0, 75.0]))
+    ax_3d.plot_surface(xx, yy, np.zeros_like(xx), color="#6aaec2", alpha=0.15,
+                       shade=False, linewidth=0)
+    ax_3d.scatter([0], [0], [-NV_DEPTH], s=24, color="#0b0b0b",
+                  depthshade=False, label="single NV")
+    # Draw the same accepted/rejected rays in 3D, with the side-core fold
+    # continuing from the microlens plane to the fibre core plane.
+    rejected = np.flatnonzero(~accepted)
+    for i in rejected[np.linspace(0, len(rejected) - 1,
+                                  min(45, len(rejected)), dtype=int)]:
+        ax_3d.plot([0, x_int[i], surface[i, 0]], [0, 0, 0],
+                   [-NV_DEPTH, 0, surface[i, 2]], color="#a7a59e", lw=0.35, alpha=0.18)
+    collected = np.flatnonzero(accepted)
+    for i in collected[np.linspace(0, len(collected) - 1,
+                                   min(20, len(collected)), dtype=int)]:
+        j = np.flatnonzero(accepted_by[:, i])[0]
+        core_x = PITCH if all_fibers[j]['x'] > 0 else -PITCH
+        ax_3d.plot([0, x_int[i], surface[i, 0]], [0, 0, 0],
+                   [-NV_DEPTH, 0, surface[i, 2]], color="#c85b17", lw=0.72, alpha=0.88)
+        ax_3d.plot([surface[i, 0], core_x], [0, 0],
+                   [surface[i, 2], core_z], color="#c85b17",
+                   lw=0.58, ls="--", alpha=0.68)
+    ax_3d.set_box_aspect((1.0, 1.0, 2.35))
+    ax_3d.view_init(elev=18, azim=-58)
+    ax_3d.set_xlabel("x ($\u03bcm$)", labelpad=-2)
+    ax_3d.set_ylabel("y ($\u03bcm$)", labelpad=-2)
+    ax_3d.set_zlabel("distance from diamond ($\u03bcm$)", labelpad=2)
+    ax_3d.set_title("(a) Full printed MCF tip", loc="left", fontsize=9.5, color=INK2)
+    if meshes:
+        ax_3d.legend(fontsize=6.1, loc="upper left", bbox_to_anchor=(-0.03, 1.03))
+    else:
+        ax_3d.text2D(0.04, 0.92, "STL files not found;\nshowing ray path only",
+                     transform=ax_3d.transAxes, fontsize=7.2, color=INK2)
+
     angles = np.arange(6) * np.pi / 3.0
     core_xy = PITCH * np.column_stack((np.cos(angles), np.sin(angles)))
     pupil_xy = LENS_R * np.column_stack((np.cos(angles), np.sin(angles)))
@@ -448,42 +748,182 @@ def fig4_mcf_ray_trace(results):
     ax_top.set_ylim(-43, 43)
     ax_top.set_xlabel("x ($\\mu$m)")
     ax_top.set_ylabel("y ($\\mu$m)")
-    ax_top.set_title("(a) MCF end-face geometry", loc="left", fontsize=9.5, color=INK2)
-    ax_top.legend(fontsize=7, loc="lower center", bbox_to_anchor=(0.5, -0.37))
+    ax_top.set_title("(b) MCF end-face geometry", loc="left", fontsize=9.5, color=INK2)
+    ax_top.legend(fontsize=6.4, loc="upper left", bbox_to_anchor=(0.0, 1.0),
+                 borderaxespad=0.2, frameon=False)
 
     ax.axvspan(-100, 0, color="#c9e5f2", alpha=0.72, label="diamond")
-    ax.axvspan(0, g, color="#f5f4ef", alpha=1.0, label="air gap")
-    ax.axvspan(g, g + MCF_RED_LENS_HEIGHT, color="#e8d8b7", alpha=0.8,
-               label="IP-S red lens")
-    rejected = np.flatnonzero(~accepted)
+    ax.axvspan(0, g, color="#f5f4ef", alpha=1.0, label="air to central tip")
+    ax.axvspan(g, g + MCF_SIDE_TIP_OFFSET, color="#cfe8dd", alpha=0.72,
+               label="central raised lens")
+    ax.axvspan(g_side, g + MCF_GREEN_LENS_HEIGHT, color="#e8d8b7", alpha=0.8,
+               label="common IP-S body")
+    # STL-calibrated cylindrical cap; the six overlapping caps are drawn as
+    # their outer envelope, never as stacked optical interfaces.
+    cap_x = np.linspace(-W0_LENS, W0_LENS, 160)
+    cap_z = g_side + cap_x * cap_x / (2.0 * MCF_R_RADIAL)
+    for sign in (-1, 1):
+        ax.plot(cap_z, sign * LENS_R + cap_x, color="#875a13", lw=1.15, zorder=4)
+    central_x = np.linspace(-W0_LENS, W0_LENS, 160)
+    central_z = g + central_x * central_x / (2.0 * MCF_CENTRAL_R)
+    ax.plot(central_z, central_x, color="#178b63", lw=1.25, zorder=4)
     for i in rejected[np.linspace(0, len(rejected) - 1, min(140, len(rejected)), dtype=int)]:
-        ax.plot([-NV_DEPTH, 0, g], [0, x_int[i], x_f[i]], color="#a7a59e", lw=0.35, alpha=0.20)
-    collected = np.flatnonzero(accepted)
+        ax.plot([-NV_DEPTH, 0, surface[i, 2]], [0, x_int[i], surface[i, 0]], color="#a7a59e", lw=0.35, alpha=0.20)
     for i in collected[np.linspace(0, len(collected) - 1, min(45, len(collected)), dtype=int)]:
         j = np.flatnonzero(accepted_by[:, i])[0]
         core_x = PITCH if fibers[j]['x'] > 0 else -PITCH
-        ax.plot([-NV_DEPTH, 0, g], [0, x_int[i], x_f[i]], color="#c85b17", lw=0.9, alpha=0.92)
-        ax.plot([g, g + MCF_RED_LENS_HEIGHT], [x_f[i], core_x], color="#c85b17",
+        ax.plot([-NV_DEPTH, 0, surface[i, 2]], [0, x_int[i], surface[i, 0]], color="#c85b17", lw=0.9, alpha=0.92)
+        ax.plot([surface[i, 2], core_z], [surface[i, 0], core_x], color="#c85b17",
                 lw=0.65, ls="--", alpha=0.7)
     ax.scatter([0], [0], s=38, color="#0b0b0b", zorder=5, label="single NV")
     for sign in (-1, 1):
-        ax.scatter([g], [sign * LENS_R], s=30, color="#d78500", zorder=5)
-        ax.scatter([g + MCF_RED_LENS_HEIGHT], [sign * PITCH], s=34, color="#2a78d6", zorder=5)
+        ax.scatter([g_side], [sign * LENS_R], s=30, color="#d78500", zorder=5)
+        ax.scatter([core_z], [sign * PITCH], s=34, color="#2a78d6", zorder=5)
+    ax.scatter([core_z], [0], s=38, marker="s", color="#1baf7a", zorder=5)
     ax.axvline(0, color="#75808a", lw=0.8)
-    ax.axvline(g, color="#75808a", lw=0.8)
-    ax.set_xlim(-105, g + MCF_RED_LENS_HEIGHT + 12)
+    ax.axvline(g_side, color="#75808a", lw=0.8)
+    ax.set_xlim(-105, core_z + 12)
     ax.set_ylim(-52, 52)
     ax.set_xlabel("z from diamond surface ($\\mu$m)")
     ax.set_ylabel("x in meridional plane ($\\mu$m)")
-    ax.set_title(f"(b) 700 nm rays at fixed-design optimum, g = {g:.0f} $\\mu$m", loc="left", fontsize=9.5, color=INK2)
-    ax.text(0.98, 0.04, "orange = collected; dashed =\neffective pupil-to-core map",
+    ax.set_title(f"(c) 700 nm rays at fixed-design optimum, g = {g:.0f} $\\mu$m", loc="left", fontsize=9.5, color=INK2)
+    ax.text(0.98, 0.04, "orange = collected; dashed =\nin-polymer path to core",
             transform=ax.transAxes, ha="right", va="bottom", fontsize=7.2, color=INK2)
     fig.text(0.5, 0.005,
-             "MCF values: Shukhin et al., OMN 2024; microlens.xlsx orange (650 nm) design. "
-             "The curved printed lens is modeled as an effective Gaussian pupil, not an assumed sag profile.",
+             "MCF geometry: Cylinder_job.gwl + Side lenses_data.gwl + Central lens_data.gwl; "
+             "IP-S n=1.52, MFD=10 um. All three meshes are one printed IP-S piece; "
+             "Ring_data.gwl is commented out and overlapping caps are one external polymer envelope.",
              ha="center", fontsize=7.2, color=INK2)
-    fig.tight_layout(rect=(0, 0.08, 1, 1))
+    # 3-D axes are not compatible with tight_layout on older Matplotlib; use
+    # explicit margins so the vector/PDF layout is deterministic.
+    fig.subplots_adjust(left=0.025, right=0.995, bottom=0.16, top=0.94, wspace=0.30)
     save(fig, "fig4_mcf_ray_trace")
+
+
+def fig4_mcf_interactive(results):
+    """Write a rotatable Plotly version of the complete printed-tip figure."""
+    import plotly.graph_objects as go
+
+    cfg = results["MCF fixed aim"]['cfg']
+    g = results["MCF fixed aim"]['g_opt']
+    paths = mcf_display_paths(g)
+    g_side, core_z = paths['g_side'], paths['core_z']
+    all_fibers = paths['all_fibers']
+    accepted_by = paths['accepted_by'].T
+    accepted = np.any(accepted_by, axis=0)
+    x_int, surface = paths['x_int'], paths['surface']
+
+    fig = go.Figure()
+
+    def add_mesh(tri, name, color, opacity, legendgroup=None, showlegend=True):
+        n = len(tri)
+        xyz = tri.reshape(-1, 3)
+        idx = np.arange(n) * 3
+        fig.add_trace(go.Mesh3d(
+            x=xyz[:, 0], y=xyz[:, 1], z=xyz[:, 2],
+            i=idx, j=idx + 1, k=idx + 2,
+            name=name, color=color, opacity=opacity,
+            legendgroup=legendgroup, showlegend=showlegend,
+            flatshading=True, lighting=dict(ambient=0.55, diffuse=0.65,
+                                            specular=0.18, roughness=0.8),
+            hovertemplate=name + "<br>x=%{x:.1f} μm<br>y=%{y:.1f} μm<br>z=%{z:.1f} μm<extra></extra>"))
+
+    for part_index, (kind, tri, color, label) in enumerate(mcf_printed_meshes(g)):
+        # Colors still distinguish the STL regions visually, but the single
+        # legend item and legendgroup make clear that they are one printed
+        # polymer piece, not three serial optical interfaces.
+        add_mesh(tri, "printed IP-S union" if part_index == 0 else label,
+                 color, 0.18 if kind == "cylinder" else 0.38,
+                 legendgroup="printed-union", showlegend=(part_index == 0))
+
+    # Diamond surface and the on-axis emitter.
+    d = np.array([-75.0, 75.0])
+    fig.add_trace(go.Mesh3d(
+        x=[d[0], d[1], d[1], d[0]], y=[d[0], d[0], d[1], d[1]], z=[0, 0, 0, 0],
+        i=[0, 0], j=[1, 2], k=[2, 3], name="diamond surface",
+        color="#6aaec2", opacity=0.16, showlegend=False, hoverinfo="skip"))
+    fig.add_trace(go.Scatter3d(
+        x=[0], y=[0], z=[-NV_DEPTH], mode="markers", name="single NV",
+        marker=dict(size=5, color="#111111"),
+        hovertemplate="single NV<br>z=%{z:.1f} μm<extra></extra>"))
+
+    def add_path_trace(indices, name, color, dash="solid", width=2.0):
+        xx, yy, zz = [], [], []
+        for i in indices:
+            xx += [0.0, float(x_int[i]), float(surface[i, 0]), None]
+            yy += [0.0, 0.0, 0.0, None]
+            zz += [-NV_DEPTH, 0.0, float(surface[i, 2]), None]
+        fig.add_trace(go.Scatter3d(
+            x=xx, y=yy, z=zz, mode="lines", name=name,
+            line=dict(color=color, width=width, dash=dash),
+            hoverinfo="skip"))
+
+    rejected = np.flatnonzero(~accepted)
+    collected = np.flatnonzero(accepted)
+    add_path_trace(rejected[np.linspace(0, len(rejected) - 1,
+                                      min(55, len(rejected)), dtype=int)],
+                   "rejected rays", "#a7a59e", width=1.2)
+    fold_x, fold_y, fold_z = [], [], []
+    for i in collected[np.linspace(0, len(collected) - 1,
+                                   min(28, len(collected)), dtype=int)]:
+        j = np.flatnonzero(accepted_by[:, i])[0]
+        core_x = PITCH if all_fibers[j]['x'] > 0 else -PITCH
+        fold_x += [float(surface[i, 0]), core_x, None]
+        fold_y += [0.0, 0.0, None]
+        fold_z += [float(surface[i, 2]), core_z, None]
+    add_path_trace(collected[np.linspace(0, len(collected) - 1,
+                                         min(28, len(collected)), dtype=int)],
+                   "collected rays", "#c85b17", width=2.5)
+    fig.add_trace(go.Scatter3d(
+        x=fold_x, y=fold_y, z=fold_z, mode="lines", name="lens-to-core fold",
+        line=dict(color="#c85b17", width=2.2, dash="dash"), hoverinfo="skip"))
+
+    angles = np.arange(6) * np.pi / 3.0
+    core_xy = PITCH * np.column_stack((np.cos(angles), np.sin(angles)))
+    pupil_xy = LENS_R * np.column_stack((np.cos(angles), np.sin(angles)))
+    fig.add_trace(go.Scatter3d(
+        x=core_xy[:, 0], y=core_xy[:, 1], z=np.full(6, core_z),
+        mode="markers", name="physical side cores",
+        marker=dict(size=4, color="#2a78d6"), hovertemplate="side core<extra></extra>"))
+    fig.add_trace(go.Scatter3d(
+        x=pupil_xy[:, 0], y=pupil_xy[:, 1], z=np.full(6, g_side),
+        mode="markers", name="red lens pupils",
+        marker=dict(size=3.5, color="#d78500"), hovertemplate="side lens pupil<extra></extra>"))
+    fig.add_trace(go.Scatter3d(
+        x=[0], y=[0], z=[core_z],
+        mode="markers", name="green central core",
+        marker=dict(size=5, color="#1baf7a", symbol="square"),
+        hovertemplate="central core<extra></extra>"))
+
+    legend_positions = [
+        ("Legend: top-left", 0.01, 0.99, "left", "top"),
+        ("Legend: top-right", 0.99, 0.99, "right", "top"),
+        ("Legend: bottom-left", 0.01, 0.01, "left", "bottom"),
+        ("Legend: bottom-right", 0.99, 0.01, "right", "bottom"),
+    ]
+    fig.update_layout(
+        title=f"Interactive MCF printed structure and 700 nm ray paths (g = {g:.0f} μm)",
+        template="plotly_white", height=760, margin=dict(l=0, r=0, t=92, b=0),
+        scene=dict(xaxis_title="x (μm)", yaxis_title="y (μm)",
+                   zaxis_title="distance from diamond (μm)",
+                   aspectmode="manual", aspectratio=dict(x=1, y=1, z=2.35),
+                   xaxis=dict(range=[-82, 82]), yaxis=dict(range=[-82, 82]),
+                   zaxis=dict(range=[-NV_DEPTH - 8, core_z + 8]),
+                   camera=dict(eye=dict(x=1.45, y=1.45, z=1.05))),
+        legend=dict(x=0.01, y=0.99, xanchor="left", yanchor="top",
+                    bgcolor="rgba(255,255,255,0.78)", groupclick="togglegroup"),
+        updatemenus=[dict(
+            type="buttons", direction="right", x=0.01, y=1.12,
+            xanchor="left", yanchor="top", showactive=True,
+            buttons=[dict(label=label, method="relayout",
+                          args=[{"legend": {"x": x, "y": y,
+                                             "xanchor": xa, "yanchor": ya}}])
+                     for label, x, y, xa, ya in legend_positions])])
+    path = os.path.join(OUT, "fig4_mcf_structure_interactive.html")
+    fig.write_html(path, include_plotlyjs=True, full_html=True,
+                   config={"responsive": True, "displaylogo": False,
+                           "scrollZoom": True})
+    return path
 
 # ================================ main ==================================
 if __name__ == "__main__":
@@ -496,6 +936,7 @@ if __name__ == "__main__":
     fig2(results, spectra)
     fig3(results)
     fig4_mcf_ray_trace(results)
+    fig4_mcf_interactive(results)
 
     print(f"\nfigures written to {OUT}  ({time.time()-t0:.0f} s)")
     print(f"max saturation parameter s = I/I_sat encountered: {s_max:.2e}"
@@ -507,8 +948,8 @@ if __name__ == "__main__":
         k = int(np.argmax(r['eta1']))
         print(f"{name:>14} | {r['g_opt']:7.0f} | {r['eta1'][k]*100:10.4f} | "
               f"{r['rate1'][k]*1e-3:12.5f} | {r['powE'][k]:10.3f} | {r['a50'][k]:12.1f}")
-    print("\nNotes: fixed-aim MCF uses the paper/spreadsheet 650 nm red design: 16.8434 um"
-          "\nlens-pupil radius, 141.185 um air path and a 30 um target depth; re-aimed MCF"
+    print("\nNotes: fixed-aim MCF uses the supplied STL/GWL geometry: 17.5 um side-lens radius,"
+          "\n35.225 um central-to-side tip offset, IP-S n=1.52 and 10 um MFD; re-aimed MCF"
           "\nrecalculates the side-core boresights at every gap for the 85 um NV layer."
           "\nA50 is an on-axis circular area on the NV layer containing 50% of the"
           "\nexcitation x collection weighted ensemble signal. Single-NV rates are reported"
