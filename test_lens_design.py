@@ -1,13 +1,18 @@
 """Small assert-based check for the physical freeform lens model."""
+import io
 import os
 import struct
 import tempfile
+from contextlib import redirect_stdout
 
 import numpy as np
 
 from lens_design import (COMPARISON_NORMALIZATION, DEPTHS, MCF_MFD, RED_LAM,
                          RED_W, SEARCH_DEPTHS, SEARCH_RED_LAM, SEARCH_RED_W,
-                         alignment_sweep, beam_stats, evaluate_design, fit_surface,
+                         PRINT_X_UM, PRINT_Y_UM, PRINT_Z_UM, _ProgressBar,
+                         _ray_density, _search_objective, _search_spec,
+                         _search_surfaces, alignment_sweep, beam_stats,
+                         design_parameters, evaluate_design, fit_surface,
                          replicated_surfaces, surface_limits, trace_mode,
                          validate_design, write_binary_stl)
 from physics import nv_emission_spectrum
@@ -19,6 +24,7 @@ def main():
                        center_r=35, side_offset=35)
     union = replicated_surfaces(central, side)
     assert MCF_MFD == 10.0
+    assert (PRINT_X_UM, PRINT_Y_UM, PRINT_Z_UM) == (300.0, 300.0, 300.0)
     assert len(DEPTHS) == len(RED_LAM) == 33
     assert len(SEARCH_DEPTHS) == len(SEARCH_RED_LAM) == 9
     assert np.isclose(RED_W.sum(), 1.0) and np.isclose(SEARCH_RED_W.sum(), 1.0)
@@ -32,9 +38,34 @@ def main():
         tr = trace_mode(surface, union, lam, n_grid=25)
         assert tr['throughput'] > 0 and np.any(tr['valid'])
         assert beam_stats(tr, lam)[2]['fwhm'] > 0
+    density_axis = np.linspace(-150.0, 150.0, 601)
+    density = _ray_density(tr, 2, density_axis, 750.0,
+                           np.arange(6)*np.pi/3.0)
+    assert np.isclose(density.sum()*(density_axis[1]-density_axis[0])**2,
+                      6.0*tr['throughput'], rtol=2e-3)
+    from redesign_fig import _incident_start
+    ray = np.flatnonzero(tr['valid'])[0]
+    start = _incident_start(side, tr, ray)
+    drawn_incident = tr['points'][ray]-start
+    drawn_incident /= np.linalg.norm(drawn_incident)
+    assert np.isclose(start[2], side['base_z'])
+    assert np.allclose(drawn_incident, tr['incident'][ray])
     result = evaluate_design(central, side, grid_n=81)
     design = dict(central=central, side=side, result=result)
     assert validate_design(design)
+    _, _, x0, _ = _search_spec('quadratic', 'quadratic')
+    searched = _search_surfaces(x0, 'quadratic', 'quadratic')
+    p = design_parameters(*searched)
+    assert p['central_side_overlap_um'] == 3.0
+    assert p['side_core_offset_um'] == 0.0
+    bad = x0.copy(); bad[:2] = [295, 295]
+    assert np.isinf(_search_objective(
+        bad, 'quadratic', 'quadratic', 'full'))
+    progress_output = io.StringIO()
+    with redirect_stdout(progress_output):
+        progress = _ProgressBar('test', 2)
+        progress(None, None); progress(None, None); progress.finish()
+    assert '100%' in progress_output.getvalue()
     tilted = trace_mode(side, union, 750.0, depths=[85.0], n_grid=25, tilt_deg=3.0)
     a = np.deg2rad(3.0); normal = np.array([np.sin(a), 0.0, -np.cos(a)])
     assert np.max(np.abs(tilted['air_surface'][tilted['valid']] @ normal)) < 1e-10

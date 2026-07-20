@@ -15,6 +15,14 @@ from lens_design import (MEASURED, alignment_sweep, design_at_gap, evaluate_desi
 from paper_figures import INK, INK2, OUT, save
 
 
+def _incident_start(surface, trace, index):
+    """Back-project the traced polymer direction to the fibre base plane."""
+    point = trace['points'][index]
+    direction = trace['incident'][index]
+    scale = (surface['base_z']-point[2])/direction[2]
+    return point + scale*direction
+
+
 def _ray_panel(ax, surface, union, lam, title, color):
     tr = trace_mode(surface, union, lam, depths=[85.0], n_grid=31)
     ids = np.flatnonzero(tr['valid'] & (np.abs(tr['points'][:, 1])
@@ -23,9 +31,10 @@ def _ray_panel(ax, surface, union, lam, title, color):
         ids = ids[np.linspace(0, len(ids)-1, 17, dtype=int)]
     core_x = surface['core_r']
     for i in ids:
-        ax.plot([core_x, tr['points'][i, 0], tr['air_surface'][i, 0],
+        start = _incident_start(surface, tr, i)
+        ax.plot([start[0], tr['points'][i, 0], tr['air_surface'][i, 0],
                  tr['hits'][0, i, 0]],
-                [surface['base_z'], tr['points'][i, 2], 0.0,
+                [start[2], tr['points'][i, 2], 0.0,
                  tr['hits'][0, i, 2]], color=color, lw=0.65, alpha=0.72)
     x = np.linspace(-65, 75, 900)
     support = surface['base_z']-8.0
@@ -88,10 +97,8 @@ def _paths(surface, union, lam, count):
     ids = np.flatnonzero(tr['valid'] & (tr['weight'] > 0))
     if len(ids) > count:
         ids = ids[np.linspace(0, len(ids)-1, count, dtype=int)]
-    a = surface.get('angle', 0.0)
-    core = np.array([surface['core_r']*np.cos(a),
-                     surface['core_r']*np.sin(a), surface['base_z']])
-    return [np.vstack([core, tr['points'][i], tr['air_surface'][i],
+    return [np.vstack([_incident_start(surface, tr, i), tr['points'][i],
+                       tr['air_surface'][i],
                        tr['hits'][0, i]]) for i in ids]
 
 

@@ -1,8 +1,8 @@
 """Search physical lens families and export one-side and full seven-core STLs."""
 import os
 
-from lens_design import (search_design, validate_design, write_binary_stl,
-                         write_design_json, surface_limits)
+from lens_design import (design_parameters, search_design, surface_limits,
+                         validate_design, write_binary_stl, write_design_json)
 from paper_figures import OUT
 
 
@@ -16,11 +16,18 @@ def main():
     write_design_json(design, json_path)
     ntri = write_binary_stl(design, stl_path)
     nfull = write_binary_stl(design, full_stl_path, all_sides=True)
+    p = design_parameters(design["central"], design["side"])
+    print("optimized geometry:")
+    for key in ("central_lens_type", "side_lens_type", "air_gap_um",
+                "central_side_overlap_um", "side_side_overlap_um",
+                "side_core_offset_um", "central_height_um", "side_height_um"):
+        print(f"  {key}: {p[key]}")
     for name in ("central", "side"):
         s = design[name]; lim = surface_limits(s)
         print(f"{name}: {s['family']}, aperture={s['aperture']:.1f} um, "
               f"radial centre={s['center_r']:.1f} um, apex z={s['apex']:.1f} um, "
               f"height={lim['print_height']:.1f} um, max slope={lim['max_slope']:.3f}")
+        print("  shape parameters:", s.get("shape_parameters", {}))
         print("  coefficients:", " ".join(f"{x:.8g}" for x in s['coef']))
     r = design['result']
     print(f"fiber={r['model_fiber_photons_s']:.6g} photons/s, "

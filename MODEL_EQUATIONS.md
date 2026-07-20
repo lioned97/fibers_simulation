@@ -356,6 +356,40 @@ even where the geometric one is flat — so §0's spectral average is non-trivia
 
 ---
 
+## 9. Printed-lens optimization footprint
+
+`lens_design.py` evaluates the actual Snell-traced landing positions. For ray
+$i$ with traced power $w_i$ and landing position $\mathbf r_i$, the power
+density at an NV plane is
+
+$$
+D_\lambda(\mathbf r)=\sum_i w_i K_{\sigma_\lambda}
+(\mathbf r-\mathbf r_i),\qquad
+\sigma_\lambda=\frac{\lambda}{2\pi n_\mathrm{dia}\sin\theta_{90}},
+$$
+
+where $K$ is a normalized diffraction-blur kernel. The excitation intensity is
+$I_\mathrm{exc}=P_{532}D_{532}$. By reciprocity, the collection map for each
+side-core mode is
+
+$$
+\eta_\lambda(\mathbf r)=
+\frac{\lambda^2}{8\pi n_\mathrm{dia}^2}D_\lambda(\mathbf r).
+$$
+
+The six rotated side maps and the normalized NV spectrum are summed before the
+saturated NV excitation and collection overlap is integrated. Consequently,
+folded bundles and split spots remain separated in the score; they are not
+collapsed to Gaussian-equivalent centroid and covariance values.
+
+The search varies lens family, central-side overlap, side-lens/core radial
+offset, independent lens heights, clear aperture, air gap, and family-specific
+radius/asphere/freeform factors. It rejects any surface outside the fixed
+300 x 300 x 300 um print volume. NV concentration (3 ppm), depth (80-90 um),
+and emission band (650-850 nm) are fixed inputs, not optimizer variables.
+
+---
+
 ### Note on what is and isn't modelled
 
 - **Spectral averaging — implemented**: $n_{\text{dia}}(\lambda)$ varies over the

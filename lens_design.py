@@ -10,34 +10,41 @@ printed polymer/fibre z>0, and g is central-lens-to-diamond clearance.
 import json
 import os
 import struct
+import sys
+from functools import lru_cache
 
 import numpy as np
+from scipy.ndimage import gaussian_filter
+from scipy.optimize import differential_evolution
 
 from physics import diamond_sellmeier, nv_emission_spectrum
 from paper_figures import (
     E_PHOT_RED, I_SAT, MCF_IPS_N, MCF_MFD, P_GREEN_MW,
-    RHO, R_SAT,
+    PPM, RHO, R_SAT,
 )
 from sensitivity import MEASURED, linewidth_from_resolution, calibrated_sensitivity
 
 N_AIR = 1.0
 CORE_R = 35.0
 W_MODE = MCF_MFD / 2.0
-MAX_PRINT = 300.0
+PRINT_X_UM = PRINT_Y_UM = PRINT_Z_UM = 300.0
+MAX_PRINT = PRINT_Z_UM  # compatibility name used by the fabrication scripts
+NV_DEPTH_UM = (80.0, 90.0)
+NV_SPECTRUM_NM = (650.0, 850.0)
 
 
 def _spectral_quadrature(points):
     """Normalized trapezoidal quadrature of the NV spectrum over 650--850 nm."""
-    wavelength = np.linspace(650.0, 850.0, int(points))
+    wavelength = np.linspace(*NV_SPECTRUM_NM, int(points))
     weight = nv_emission_spectrum(wavelength)
     weight[[0, -1]] *= 0.5
     return wavelength, weight/weight.sum()
 
 
 # Cheap, deterministic screening is followed by a converged final evaluation.
-SEARCH_DEPTHS = np.linspace(80.0, 90.0, 9)
+SEARCH_DEPTHS = np.linspace(*NV_DEPTH_UM, 9)
 SEARCH_RED_LAM, SEARCH_RED_W = _spectral_quadrature(9)
-DEPTHS = np.linspace(80.0, 90.0, 33)
+DEPTHS = np.linspace(*NV_DEPTH_UM, 33)
 RED_LAM, RED_W = _spectral_quadrature(33)
 
 # The legacy model checkpoint is kept explicit because it is only an empirical
@@ -294,6 +301,49 @@ def beam_stats(trace, lam_nm, depths=SEARCH_DEPTHS):
     return rows
 
 
+def _ray_density(trace, depth_index, axis, lam_nm, rotations=(0.0,)):
+    """Deposit the actual weighted ray hits and apply only diffraction blur."""
+    valid = trace["valid"] & (trace["weight"] > 0.0)
+    if not np.any(valid):
+        return np.zeros((len(axis), len(axis)))
+    tilt = np.deg2rad(float(trace.get("tilt_deg", 0.0)))
+    tangent_x = np.array([np.cos(tilt), 0.0, np.sin(tilt)])
+    tangent_y = np.array([0.0, 1.0, 0.0])
+    hits = trace["hits"][depth_index, valid]
+    base_xy = np.column_stack([hits @ tangent_x, hits @ tangent_y])
+    rotations = np.atleast_1d(rotations)
+    xy = np.vstack([
+        base_xy @ np.array([[np.cos(a), np.sin(a)],
+                            [-np.sin(a), np.cos(a)]])
+        for a in rotations
+    ])
+
+    dx = axis[1]-axis[0]
+    qx = (xy[:, 0]-axis[0])/dx
+    qy = (xy[:, 1]-axis[0])/dx
+    ix, iy = np.floor(qx).astype(int), np.floor(qy).astype(int)
+    fx, fy = qx-ix, qy-iy
+    density = np.zeros((len(axis), len(axis)))
+    weights = np.tile(trace["weight"][valid], len(rotations))
+    for ox, oy, fraction in ((0, 0, (1-fx)*(1-fy)),
+                             (1, 0, fx*(1-fy)),
+                             (0, 1, (1-fx)*fy),
+                             (1, 1, fx*fy)):
+        xj, yj = ix+ox, iy+oy
+        inside = ((xj >= 0) & (xj < len(axis)) &
+                  (yj >= 0) & (yj < len(axis)))
+        np.add.at(density, (yj[inside], xj[inside]),
+                  weights[inside]*fraction[inside])
+
+    n_dia = float(diamond_sellmeier(lam_nm/1000.0))
+    diamond_normal = trace["diamond_normal"]
+    angle = np.arccos(np.clip(trace["diamond"][valid] @ diamond_normal, -1.0, 1.0))
+    theta = max(float(np.percentile(angle, 90)), 1e-4)
+    diffraction_sigma = (lam_nm*1e-3)/(2*np.pi*n_dia*np.sin(theta))
+    return gaussian_filter(
+        density, diffraction_sigma/dx, mode="constant")/(dx*dx)
+
+
 def surface_limits(surface):
     x, y, _ = _disk(81)
     sag, gx, gy = _sag_grad(surface, surface["aperture"]*x,
@@ -318,13 +368,6 @@ def candidate_merit(surface, role):
     return float(np.sum(vals))
 
 
-def _gaussian(x, y, mean, cov):
-    inv = np.linalg.inv(cov)
-    qx, qy = x-mean[0], y-mean[1]
-    e = inv[0, 0]*qx*qx + 2*inv[0, 1]*qx*qy + inv[1, 1]*qy*qy
-    return np.exp(-0.5*e)
-
-
 def evaluate_design(central, side, grid_n=121, tilt_deg=0.0, depths=DEPTHS,
                     red_lam=RED_LAM, red_w=RED_W, ray_grid=35):
     """Full 3-D layer integration, including a diamond-plane tilt about y.
@@ -339,15 +382,18 @@ def evaluate_design(central, side, grid_n=121, tilt_deg=0.0, depths=DEPTHS,
     if len(depths) < 2 or len(red_lam) != len(red_w):
         raise ValueError("depth and spectral quadratures are inconsistent")
     union = replicated_surfaces(central, side)
-    cstats = beam_stats(trace_mode(central, union, 532.0, depths, ray_grid,
-                                   tilt_deg=tilt_deg), 532.0, depths)
+    central_trace = trace_mode(central, union, 532.0, depths, ray_grid,
+                               tilt_deg=tilt_deg)
+    cstats = beam_stats(central_trace, 532.0, depths)
     sstats = []
+    side_traces = []
     side_surfaces = [side] if abs(float(tilt_deg)) < 1e-12 else union[1:]
     for lam, sw in zip(red_lam, red_w):
-        rows = [beam_stats(trace_mode(surface, union, lam, depths, ray_grid,
-                                      tilt_deg=tilt_deg), lam, depths)
-                for surface in side_surfaces]
+        traces = [trace_mode(surface, union, lam, depths, ray_grid,
+                             tilt_deg=tilt_deg) for surface in side_surfaces]
+        rows = [beam_stats(trace, lam, depths) for trace in traces]
         sstats.append((lam, sw, rows))
+        side_traces.append((lam, sw, traces))
 
     all_stats = cstats + [x for _, _, groups in sstats for rows in groups for x in rows]
     lim = max(5.0, max(np.max(np.abs(x["mean"])) + 5.0*x["fwhm"]
@@ -361,29 +407,21 @@ def evaluate_design(central, side, grid_n=121, tilt_deg=0.0, depths=DEPTHS,
     moments = np.zeros(6)  # W, Wx, Wy, Wxx, Wyy, Wxy
 
     for iz, depth in enumerate(depths):
-        cs = cstats[iz]
-        exc_shape = _gaussian(x, y, cs["mean"], cs["cov"])
-        exc_norm = 2.0*np.pi*np.sqrt(np.linalg.det(cs["cov"]))
-        intensity = P_GREEN_MW*cs["throughput"]*exc_shape/exc_norm
+        intensity = P_GREEN_MW*_ray_density(central_trace, iz, axis, 532.0)
         sat = intensity/I_SAT
         rate = R_SAT*sat/(1.0+sat)
 
         eta = np.zeros_like(x)
-        for lam, sw, groups in sstats:
-            for k, rows in enumerate(groups if len(groups) > 1 else groups*6):
-                ss = rows[iz]
-                eig = np.sqrt(np.linalg.eigvalsh(ss["cov"]))
-                wx, wy = 2.0*eig[0], 2.0*eig[1]
-                n = float(diamond_sellmeier(lam/1000.0))
-                eta_peak = ss["throughput"]*(lam*1e-3)**2/(4*np.pi**2*n*n*wx*wy)
-                if len(groups) == 1:
-                    a = k*np.pi/3.0
-                    rot = np.array([[np.cos(a), -np.sin(a)],
-                                    [np.sin(a),  np.cos(a)]])
-                    mean, cov = rot@ss["mean"], rot@ss["cov"]@rot.T
-                else:
-                    mean, cov = ss["mean"], ss["cov"]
-                eta += sw*eta_peak*_gaussian(x, y, mean, cov)
+        for lam, sw, traces in side_traces:
+            n = float(diamond_sellmeier(lam/1000.0))
+            mode_area = (lam*1e-3)**2/(8*np.pi*n*n)
+            if len(traces) == 1:
+                density = _ray_density(
+                    traces[0], iz, axis, lam, np.arange(6)*np.pi/3.0)
+            else:
+                density = sum(_ray_density(trace, iz, axis, lam)
+                              for trace in traces)
+            eta += sw*mode_area*density
         eta = np.minimum(eta, 1.0)
         sig = RHO*rate*eta
         volume = dx*dx*dz*(0.5 if iz in (0, len(depths)-1) else 1.0)
@@ -392,6 +430,9 @@ def evaluate_design(central, side, grid_n=121, tilt_deg=0.0, depths=DEPTHS,
         moments += [ww.sum(), (ww*x).sum(), (ww*y).sum(),
                     (ww*x*x).sum(), (ww*y*y).sum(), (ww*x*y).sum()]
 
+    if (not np.isfinite(photons) or photons <= 0.0 or
+            not np.isfinite(moments[0]) or moments[0] <= 0.0):
+        raise ValueError("design produces no finite collected signal")
     comparison_cps = photons*COMPARISON_NORMALIZATION["factor"]
     mx, my = moments[1]/moments[0], moments[2]/moments[0]
     vx = moments[3]/moments[0]-mx*mx
@@ -457,75 +498,335 @@ def alignment_sweep(design, gaps_um, angles_deg, grid_n=81):
     return dict(best_gap_um=best["gap_um"], gap=gap_rows, angle=angle_rows)
 
 
-def search_design():
-    """Small deterministic search over method, position, height, and aperture."""
-    families = ("quadratic", "asphere", "biconic", "freeform")
-    shortlist = []
-    for gap in (5.0, 25.0, 75.0, 150.0, 300.0, 500.0):
-        for height in (120.0, 200.0, 280.0):
-            central = []
-            for family in families:
-                for aperture in (20.0, 35.0, 50.0):
-                    s = fit_surface(family, "central", gap, height, aperture)
-                    lim = surface_limits(s)
-                    if lim["print_height"] <= MAX_PRINT and lim["max_z"] < s["base_z"]:
-                        central.append((candidate_merit(s, "central"), s))
-            side = []
-            for family in families:
-                for aperture in (12.0, 17.5, 24.0):
-                    for center in (17.5, 25.0, 35.0):
-                        for offset in (10.0, 35.0, 70.0):
-                            if offset >= height-10.0:
-                                continue
-                            s = fit_surface(family, "side", gap, height, aperture,
-                                            center_r=center, side_offset=offset)
-                            lim = surface_limits(s)
-                            if lim["print_height"] <= MAX_PRINT and lim["max_z"] < s["base_z"]:
-                                side.append((candidate_merit(s, "side"), s))
-            # Keep two proxy-ranked shapes per family.  A single proxy winner
-            # can discard a better excitation×collection result after overlap
-            # and saturation are integrated.
-            central_best = [q for family in families for q in
-                            sorted((q for q in central if q[1]["family"] == family),
-                                   key=lambda q: q[0], reverse=True)[:2]]
-            side_best = [q for family in families for q in
-                         sorted((q for q in side if q[1]["family"] == family),
-                                key=lambda q: q[0], reverse=True)[:2]]
-            for cm, c in central_best:
-                for sm, s in side_best:
-                    union = replicated_surfaces(c, s)
-                    ct = trace_mode(c, union, 532.0, n_grid=25)
-                    st = trace_mode(s, union, 750.0, n_grid=25)
-                    overlap_merit = (cm*sm*ct["throughput"]*st["throughput"])
-                    shortlist.append((overlap_merit, c, s))
+SEARCH_GEOMETRY_NAMES = (
+    "air_gap_um", "central_height_um", "side_height_um",
+    "central_aperture_um", "central_side_overlap_um", "side_core_offset_um",
+)
+SEARCH_GEOMETRY_BOUNDS = (
+    (5, 295), (5, 295), (5, 295), (5, 150), (0, 290), (-30, 110),
+)
+FAMILY_SHAPE_PARAMETERS = {
+    "quadratic": ("radius_scale",),
+    "spherical": ("radius_scale",),
+    "asphere": ("radius_scale", "asphere_scale"),
+    "biconic": ("radius_x_scale", "radius_y_scale", "asphere_scale"),
+    "freeform": ("radius_x_scale", "radius_y_scale", "odd_scale",
+                 "quartic_scale"),
+}
+SHAPE_BOUNDS = {
+    "tilt_scale": (0.35, 2.5),
+    "radius_scale": (0.35, 2.5),
+    "radius_x_scale": (0.35, 2.5),
+    "radius_y_scale": (0.35, 2.5),
+    "asphere_scale": (-1.0, 3.0),
+    "odd_scale": (-1.0, 3.0),
+    "quartic_scale": (-1.0, 3.0),
+}
 
-    by_method = {}
-    for row in shortlist:
-        key = (row[1]["family"], row[2]["family"])
-        by_method.setdefault(key, []).append(row)
-    finalists = sorted(shortlist, key=lambda q: q[0], reverse=True)[:20]
-    finalists += [row for rows in by_method.values()
-                  for row in sorted(rows, key=lambda q: q[0], reverse=True)[:2]]
-    unique = {(c["family"], s["family"], c["apex"], c["base_z"],
-               c["aperture"], s["center_r"], s["aperture"], s["apex"]): (m, c, s)
-              for m, c, s in finalists}
-    best, method_results = None, {}
-    for _, central, side in unique.values():
-        result = evaluate_design(central, side, grid_n=81, depths=SEARCH_DEPTHS,
-                                 red_lam=SEARCH_RED_LAM, red_w=SEARCH_RED_W,
-                                 ray_grid=31)
-        key = f"{central['family']} + {side['family']}"
-        merit_key = "raw_model_sensitivity_nt"
-        if key not in method_results or result[merit_key] < method_results[key][merit_key]:
-            method_results[key] = {k: result[k] for k in
-                                   ("raw_model_sensitivity_nt",
-                                    "comparison_normalized_sensitivity_nt",
-                                    "model_fiber_photons_s",
-                                    "comparison_normalized_cps", "resolution_um")}
-        if best is None or result[merit_key] < best[0]:
-            best = (result[merit_key], central, side)
+
+def _shape_names(family, role):
+    names = FAMILY_SHAPE_PARAMETERS[family]
+    return (("tilt_scale",) + names) if role == "side" else names
+
+
+def _apply_shape_parameters(surface, values):
+    """Apply family-specific factors around the fitted Snell-law surface."""
+    surface = dict(surface)
+    coef = np.array(surface["coef"], dtype=float, copy=True)
+    values = dict(values)
+    coef[0] *= values.get("tilt_scale", 1.0)
+    if "radius_scale" in values:
+        coef[1:3] /= values["radius_scale"]
+    if "radius_x_scale" in values:
+        coef[1] /= values["radius_x_scale"]
+    if "radius_y_scale" in values:
+        coef[2] /= values["radius_y_scale"]
+    coef[3:5] *= values.get("odd_scale", 1.0)
+    coef[5:8] *= values.get(
+        "quartic_scale", values.get("asphere_scale", 1.0))
+    surface["coef"] = coef
+
+    # Keep apex as the actual lowest point after changing the polynomial.
+    surface["shift"] = 0.0
+    x, y, _ = _disk(81)
+    raw = _sag_grad(surface, surface["aperture"]*x,
+                    surface["aperture"]*y)[0]
+    surface["shift"] = -float(raw.min())
+    radius_x = (surface["aperture"]/coef[1]
+                if abs(coef[1]) > 1e-12 else None)
+    radius_y = (surface["aperture"]/coef[2]
+                if abs(coef[2]) > 1e-12 else None)
+    surface["shape_parameters"] = {
+        **{name: float(value) for name, value in values.items()},
+        "radius_x_um": None if radius_x is None else float(radius_x),
+        "radius_y_um": None if radius_y is None else float(radius_y),
+        "vertex_tilt_deg": float(np.degrees(np.arctan(coef[0]))),
+    }
+    return surface
+
+
+def _search_spec(central_family, side_family):
+    central_names = _shape_names(central_family, "central")
+    side_names = _shape_names(side_family, "side")
+    names = (SEARCH_GEOMETRY_NAMES +
+             tuple(f"central_{name}" for name in central_names) +
+             tuple(f"side_{name}" for name in side_names))
+    bounds = (SEARCH_GEOMETRY_BOUNDS +
+              tuple(SHAPE_BOUNDS[name] for name in central_names) +
+              tuple(SHAPE_BOUNDS[name] for name in side_names))
+    x0 = np.r_[25.0, 200.0, 165.0, 20.0, 3.0, 0.0,
+                np.ones(len(central_names)+len(side_names))]
+    integrality = np.r_[np.ones(len(SEARCH_GEOMETRY_NAMES), dtype=bool),
+                        np.zeros(len(names)-len(SEARCH_GEOMETRY_NAMES), dtype=bool)]
+    return names, bounds, x0, integrality
+
+
+def _search_surfaces(parameters, central_family, side_family):
+    names, bounds, _, _ = _search_spec(central_family, side_family)
+    if len(parameters) != len(names) or not np.all(np.isfinite(parameters)):
+        return None
+    values = dict(zip(names, np.asarray(parameters, dtype=float)))
+    for name in SEARCH_GEOMETRY_NAMES:
+        values[name] = float(np.rint(values[name]))
+    gap = values["air_gap_um"]
+    central_height = values["central_height_um"]
+    side_height = values["side_height_um"]
+    central_aperture = values["central_aperture_um"]
+    overlap = values["central_side_overlap_um"]
+    center = CORE_R + values["side_core_offset_um"]
+    side_aperture = center + overlap - central_aperture
+    base_z = gap + central_height
+    side_apex = base_z - side_height
+    if (any(value < lower-1e-12 or value > upper+1e-12
+            for value, (lower, upper) in zip(parameters, bounds)) or
+            center <= 0.0 or side_aperture < 5.0 or
+            central_aperture > PRINT_X_UM/2.0 or
+            center + side_aperture > PRINT_X_UM/2.0 or
+            base_z > PRINT_Z_UM or side_apex < 5.0):
+        return None
+
+    central = fit_surface(central_family, "central", gap, central_height,
+                          central_aperture)
+    side = fit_surface(
+        side_family, "side", gap, central_height, side_aperture,
+        center_r=center, side_offset=central_height-side_height)
+    offset = len(SEARCH_GEOMETRY_NAMES)
+    central_names = _shape_names(central_family, "central")
+    central = _apply_shape_parameters(
+        central, zip(central_names, parameters[offset:offset+len(central_names)]))
+    offset += len(central_names)
+    side_names = _shape_names(side_family, "side")
+    side = _apply_shape_parameters(side, zip(side_names, parameters[offset:]))
+    for surface in (central, side):
+        limits = surface_limits(surface)
+        if (limits["min_z"] < 5.0 or limits["max_z"] >= surface["base_z"] or
+                limits["max_z"] > PRINT_Z_UM or
+                limits["print_height"] > PRINT_Z_UM):
+            return None
+    return central, side
+
+
+def design_parameters(central, side):
+    """Return the independent geometry and derived overlap in report units."""
+    return {
+        "central_lens_type": central["family"],
+        "side_lens_type": side["family"],
+        "air_gap_um": float(central["apex"]),
+        "central_side_overlap_um": float(
+            central["aperture"] + side["aperture"] - side["center_r"]),
+        "side_side_overlap_um": float(
+            2.0*side["aperture"] - side["center_r"]),
+        "side_core_offset_um": float(side["center_r"] - CORE_R),
+        "central_height_um": float(central["base_z"] - central["apex"]),
+        "side_height_um": float(side["base_z"] - side["apex"]),
+        "central_aperture_um": float(central["aperture"]),
+        "side_aperture_um": float(side["aperture"]),
+        "central_shape": central.get("shape_parameters", {}),
+        "side_shape": side.get("shape_parameters", {}),
+    }
+
+
+@lru_cache(maxsize=100_000)
+def _search_objective_cached(parameters, central_family, side_family, stage):
+    try:
+        surfaces = _search_surfaces(parameters, central_family, side_family)
+        if surfaces is None:
+            return np.inf
+        central, side = surfaces
+        if stage == "full":
+            result = evaluate_design(
+                central, side, grid_n=81, depths=SEARCH_DEPTHS,
+                red_lam=SEARCH_RED_LAM, red_w=SEARCH_RED_W, ray_grid=31)
+            merit = result["raw_model_sensitivity_nt"]
+            return merit if np.isfinite(merit) else np.inf
+        cm = candidate_merit(central, "central")
+        sm = candidate_merit(side, "side")
+        union = replicated_surfaces(central, side)
+        ct = trace_mode(central, union, 532.0, n_grid=25)
+        st = trace_mode(side, union, 750.0, n_grid=25)
+        merit = cm*sm*ct["throughput"]*st["throughput"]
+        return -merit if np.isfinite(merit) and merit > 0.0 else np.inf
+    except (FloatingPointError, ValueError, np.linalg.LinAlgError):
+        return np.inf
+
+
+def _search_objective(parameters, central_family, side_family, stage):
+    geometry = tuple(int(x) for x in np.rint(
+        parameters[:len(SEARCH_GEOMETRY_NAMES)]))
+    shape = tuple(float(np.round(x, 5))
+                  for x in parameters[len(SEARCH_GEOMETRY_NAMES):])
+    key = geometry + shape
+    return _search_objective_cached(key, central_family, side_family, stage)
+
+
+def _coordinate_refine(parameters, central_family, side_family):
+    """Finish at 1-um geometry and 0.02-factor shape resolution."""
+    _, bounds, _, integrality = _search_spec(central_family, side_family)
+    point = np.asarray(parameters, dtype=float).copy()
+    point[integrality] = np.rint(point[integrality])
+    merit = _search_objective(point, central_family, side_family, "full")
+    for geometry_step, shape_step in ((10, 0.2), (5, 0.1), (2, 0.05), (1, 0.02)):
+        while True:
+            candidates = []
+            for dimension, (lower, upper) in enumerate(bounds):
+                step = geometry_step if integrality[dimension] else shape_step
+                for direction in (-1, 1):
+                    candidate = point.copy()
+                    candidate[dimension] = np.clip(
+                        candidate[dimension]+direction*step, lower, upper)
+                    if integrality[dimension]:
+                        candidate[dimension] = np.rint(candidate[dimension])
+                    candidates.append(candidate)
+            scored = [(_search_objective(candidate, central_family, side_family,
+                                         "full"), candidate)
+                      for candidate in candidates]
+            next_merit, next_point = min(scored, key=lambda row: row[0])
+            if next_merit >= merit:
+                break
+            merit, point = next_merit, next_point
+    return merit, point
+
+
+class _ProgressBar:
+    """Terminal bar, with 10% checkpoints when output is redirected to a log."""
+
+    def __init__(self, label, total, width=30):
+        self.label, self.total, self.width = label, max(int(total), 1), width
+        self.current = 0
+        self.last_log_bucket = -1
+
+    def __call__(self, _x, _convergence):
+        self.current += 1
+        self._write(False)
+        return False
+
+    def finish(self):
+        self.current = self.total
+        self._write(True)
+
+    def _write(self, finish):
+        fraction = min(self.current/self.total, 1.0)
+        percent = int(round(100*fraction))
+        if sys.stdout.isatty():
+            filled = int(round(self.width*fraction))
+            bar = "#"*filled + "-"*(self.width-filled)
+            print(f"\r  {self.label}: [{bar}] {percent:3d}% "
+                  f"({self.current}/{self.total})", end="\n" if finish else "",
+                  flush=True)
+        else:
+            bucket = 10 if finish else percent//10
+            if bucket > self.last_log_bucket:
+                self.last_log_bucket = bucket
+                print(f"  {self.label}: {10*bucket}%", flush=True)
+
+
+def search_design(families=("quadratic", "asphere", "biconic", "freeform"),
+                  proxy_maxiter=120, full_maxiter=80, popsize=8, restarts=2,
+                  workers=-1):
+    """Deterministic global integer search followed by 1-um refinement."""
+    families = tuple(families)
+    if (not families or min(proxy_maxiter, full_maxiter) < 0 or
+            popsize < 5 or restarts < 1):
+        raise ValueError("invalid search configuration")
+    worker_pool = None
+    worker_map = 1
+    if workers != 1:
+        from multiprocessing import Pool
+        worker_pool = Pool(None if workers == -1 else workers)
+        worker_map = worker_pool.map
+
+    best = None
+    method_results = {}
+    try:
+        for method_index, (central_family, side_family) in enumerate(
+                (c, s) for c in families for s in families):
+            _, bounds, x0, integrality = _search_spec(
+                central_family, side_family)
+            method_best = None
+            for restart in range(restarts):
+                seed = 1847 + 101*method_index + restart
+                label = f"{central_family} + {side_family}"
+                print(f"Optimizing {label}, restart {restart+1}/{restarts}...",
+                      flush=True)
+                proxy_progress = _ProgressBar(f"{label} proxy", proxy_maxiter)
+                proxy = differential_evolution(
+                    _search_objective, bounds,
+                    args=(central_family, side_family, "proxy"),
+                    strategy="best1bin", maxiter=proxy_maxiter,
+                    popsize=popsize, tol=0.0, atol=0.0,
+                    mutation=(0.5, 1.0), recombination=0.8,
+                    rng=np.random.default_rng(seed), polish=False,
+                    init="sobol", x0=x0,
+                    updating="deferred", workers=worker_map,
+                    integrality=integrality, callback=proxy_progress)
+                proxy_progress.finish()
+                full_progress = _ProgressBar(f"{label} full", full_maxiter)
+                full = differential_evolution(
+                    _search_objective, bounds,
+                    args=(central_family, side_family, "full"),
+                    strategy="best1bin", maxiter=full_maxiter,
+                    popsize=popsize, tol=0.0, atol=0.0,
+                    mutation=(0.5, 1.0), recombination=0.8,
+                    rng=np.random.default_rng(seed+10_000), polish=False,
+                    init="sobol", x0=proxy.x, updating="deferred",
+                    workers=worker_map, integrality=integrality,
+                    callback=full_progress)
+                full_progress.finish()
+                print(f"  proxy={-proxy.fun:.6g}, "
+                      f"search sensitivity={full.fun:.6g} nT/sqrt(Hz)",
+                      flush=True)
+                if method_best is None or full.fun < method_best[0]:
+                    method_best = (full.fun, full.x)
+
+            merit, parameters = _coordinate_refine(
+                method_best[1], central_family, side_family)
+            surfaces = _search_surfaces(parameters, central_family, side_family)
+            if surfaces is None or not np.isfinite(merit):
+                continue
+            central, side = surfaces
+            result = evaluate_design(
+                central, side, grid_n=81, depths=SEARCH_DEPTHS,
+                red_lam=SEARCH_RED_LAM, red_w=SEARCH_RED_W, ray_grid=31)
+            label = f"{central_family} + {side_family}"
+            method_results[label] = {k: result[k] for k in
+                                     ("raw_model_sensitivity_nt",
+                                      "comparison_normalized_sensitivity_nt",
+                                      "model_fiber_photons_s",
+                                      "comparison_normalized_cps", "resolution_um")}
+            print(f"  refined sensitivity={merit:.6g} nT/sqrt(Hz), "
+                  f"parameters={design_parameters(central, side)}", flush=True)
+            if best is None or merit < best[0]:
+                best = (merit, central, side)
+    finally:
+        if worker_pool is not None:
+            worker_pool.close()
+            worker_pool.join()
+
+    if best is None:
+        raise RuntimeError("search found no manufacturable design")
     final_result = evaluate_design(best[1], best[2], grid_n=161)
     return dict(central=best[1], side=best[2], result=final_result,
+                parameters=design_parameters(best[1], best[2]),
                 method_comparison=method_results)
 
 
@@ -537,17 +838,23 @@ def _surface_json(surface):
 def write_design_json(design, path):
     payload = dict(central=_surface_json(design["central"]),
                    side=_surface_json(design["side"]),
+                   parameters=design.get(
+                       "parameters", design_parameters(
+                           design["central"], design["side"])),
                    result={k: v for k, v in design["result"].items()
                            if k not in ("central_stats", "side_stats")},
                    method_comparison=design.get("method_comparison", {}),
                    measured=MEASURED,
                    comparison_normalization=COMPARISON_NORMALIZATION,
                    assumptions=dict(mfd_um=MCF_MFD, ips_index=MCF_IPS_N,
-                                    nv_ppm=3.0, nv_depth_um=[80.0, 90.0],
-                                    spectrum_nm=[650.0, 850.0], max_print_um=MAX_PRINT,
+                                    nv_ppm=PPM, nv_depth_um=list(NV_DEPTH_UM),
+                                    spectrum_nm=list(NV_SPECTRUM_NM),
+                                    print_limits_um=[PRINT_X_UM, PRINT_Y_UM,
+                                                     PRINT_Z_UM],
                                     final_depth_points=len(DEPTHS),
                                     final_spectral_points=len(RED_LAM),
                                     spectral_quadrature="normalized trapezoidal",
+                                    spatial_model="weighted traced-ray footprints with diffraction blur",
                                     green_fresnel="included once by trace_mode",
                                     method_search_quadrature_points=9))
     with open(path, "w", encoding="utf-8") as fh:
@@ -559,8 +866,8 @@ def write_binary_stl(design, path, nr=55, nt=144, all_sides=False):
     c, s = design["central"], design["side"]
     surfaces = replicated_surfaces(c, s) if all_sides else [c, s]
     base_z = c["base_z"]
-    radius = min(145.0, max(60.0, c["aperture"]+6.0,
-                            s["center_r"]+s["aperture"]+6.0))
+    radius = min(PRINT_X_UM/2.0, max(60.0, c["aperture"],
+                                    s["center_r"]+s["aperture"]))
     support = base_z-8.0
     rings = np.linspace(0.0, radius, nr)
     ang = np.arange(nt)*2*np.pi/nt
@@ -605,10 +912,15 @@ def write_binary_stl(design, path, nr=55, nt=144, all_sides=False):
 def validate_design(design):
     c, s = design["central"], design["side"]
     assert c["apex"] >= 5.0 and s["apex"] >= 5.0
-    assert c["base_z"] == s["base_z"]
+    assert np.isclose(c["base_z"], s["base_z"])
+    assert c["base_z"] <= PRINT_Z_UM+1e-9
+    assert c["aperture"] <= PRINT_X_UM/2.0+1e-9
+    assert s["center_r"]+s["aperture"] <= PRINT_X_UM/2.0+1e-9
     for surf in (c, s):
         lim = surface_limits(surf)
         assert lim["print_height"] <= MAX_PRINT+1e-9
+        assert lim["min_z"] >= 0.0 and lim["max_z"] <= PRINT_Z_UM+1e-9
+        assert lim["max_z"] < surf["base_z"]
         assert np.all(np.isfinite(surf["coef"]))
     r = design["result"]
     assert r["model_fiber_photons_s"] > 0
