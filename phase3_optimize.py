@@ -1,7 +1,8 @@
 """Search physical lens families and export one-side and full seven-core STLs."""
 import os
 
-from lens_design import (MCF_FULL_NA, design_parameters, search_design, surface_limits,
+from lens_design import (COMPARISON_NORMALIZATION, MCF_FULL_NA, design_parameters,
+                         search_design, surface_limits,
                          validate_design, write_binary_stl, write_design_json)
 from paper_figures import OUT
 
@@ -10,7 +11,11 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     print(f"Phase 3 ray model: uniformly filled full NA={MCF_FULL_NA:g} "
           "for the central core and all six side cores", flush=True)
-    design = search_design()
+    # Written after every family pair; an interrupted run resumes here instead
+    # of repeating completed work.  Delete it to force a fresh search.
+    checkpoint = os.path.join(OUT, "phase3_checkpoint.json")
+    print(f"checkpoint: {checkpoint}", flush=True)
+    design = search_design(checkpoint=checkpoint)
     validate_design(design)
     json_path = os.path.join(OUT, "mcf_freeform_design.json")
     stl_path = os.path.join(OUT, "mcf_freeform_central_one_side.stl")
@@ -45,6 +50,13 @@ def main():
           f"raw sensitivity={r['raw_model_sensitivity_nt']:.4g}, "
           f"normalized sensitivity={r['comparison_normalized_sensitivity_nt']:.4g} "
           "nT/sqrt(Hz)")
+    print(f"model regime: max I/I_sat={r['max_saturation']:.3g}, "
+          f"collection clamped over {100*r['clamped_signal_fraction']:.2f}% "
+          "of the signal")
+    print(f"NOTE the normalized figures carry an empirical "
+          f"{COMPARISON_NORMALIZATION['factor']:.1f}x model-to-experiment factor "
+          "({}); quote the raw model sensitivity unless that factor is "
+          "being discussed.".format(COMPARISON_NORMALIZATION['interpretation']))
     print(f"{json_path}\n{stl_path} ({ntri} triangles)\n"
           f"{full_stl_path} ({nfull} triangles)")
 

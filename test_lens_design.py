@@ -7,24 +7,33 @@ from contextlib import redirect_stdout
 
 import numpy as np
 
-from lens_design import (COMPARISON_NORMALIZATION, DEPTHS, MCF_FULL_NA,
+from lens_design import (APERTURE_MARGIN, COMPARISON_NORMALIZATION, DEPTHS,
+                         EXPOSURE_MIN, MCF_FULL_NA,
                          MCF_IPS_N, MCF_MFD, PRINT_X_UM, PRINT_Y_UM,
                          PRINT_Z_UM, RED_LAM, RED_W, SEARCH_DEPTHS,
                          SEARCH_RED_LAM, SEARCH_RED_W, _ProgressBar,
                          _ray_density, _search_objective, _search_spec,
                          _search_surfaces, alignment_sweep, beam_stats,
                          combined_overlap_volume, design_parameters,
-                         evaluate_design, fit_surface, replicated_surfaces,
+                         evaluate_design, exposure_fraction, fit_surface,
+                         lit_radius, optical_clearance, replicated_surfaces,
                          surface_limits, trace_full_na, trace_mode,
                          trace_na_cone, validate_design, write_binary_stl)
 from physics import nv_emission_spectrum
 
 
 def main():
-    central = fit_surface('asphere', 'central', 5, 200, 20)
-    side = fit_surface('freeform', 'side', 5, 200, 17.5,
-                       center_r=35, side_offset=35)
+    # Build the fixture through the search parametrization rather than by hand,
+    # so it satisfies the aperture, exposure, clearance, slope and thickness
+    # rules the model now enforces instead of drifting away from them.
+    _, _, seed, _ = _search_spec('asphere', 'freeform')
+    built = _search_surfaces(seed, 'asphere', 'freeform')
+    assert built is not None, 'the seed point must be a feasible design'
+    central, side = built
     union = replicated_surfaces(central, side)
+    # fit_surface still fits to Snell normals over the cap it is given.
+    probe = fit_surface('quadratic', 'central', 5, 51, 18.0)
+    assert np.isfinite(surface_limits(probe)['max_slope'])
     assert MCF_MFD == 10.0
     assert (PRINT_X_UM, PRINT_Y_UM, PRINT_Z_UM) == (300.0, 300.0, 300.0)
     assert len(DEPTHS) == len(RED_LAM) == 33
@@ -85,9 +94,23 @@ def main():
     assert overlap['summary']['half_max_volume_um3'] > 0.0
     _, _, x0, _ = _search_spec('quadratic', 'quadratic')
     searched = _search_surfaces(x0, 'quadratic', 'quadratic')
+    assert searched is not None, 'the seed point must be a feasible design'
     p = design_parameters(*searched)
-    assert p['central_side_overlap_um'] == 3.0
     assert p['side_core_offset_um'] == 0.0
+    # Every cap covers the footprint its own core lights and does not run far
+    # past it, so the fitted and physical apertures coincide.
+    searched_union = replicated_surfaces(*searched)
+    for index, surf in enumerate(searched):
+        footprint = lit_radius(surf)
+        decenter = abs(surf['center_r']-surf['core_r'])
+        assert decenter+footprint <= surf['aperture']+1e-6
+        assert surf['aperture'] <= decenter+APERTURE_MARGIN*footprint+1e-6
+        # and it is the surface that core actually refracts off.
+        assert exposure_fraction(index, searched_union) >= EXPOSURE_MIN
+        # so the apex is the clearance the beam sees.
+        assert optical_clearance(surf) <= surf['apex']+0.05*footprint+1e-6
+    # An aperture divorced from its beam footprint is no longer expressible.
+    assert 'central_aperture_um' not in _search_spec('quadratic', 'quadratic')[0]
     bad = x0.copy(); bad[:2] = [295, 295]
     assert np.isinf(_search_objective(
         bad, 'quadratic', 'quadratic', 'full'))

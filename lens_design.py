@@ -35,6 +35,32 @@ MAX_PRINT = PRINT_Z_UM  # compatibility name used by the fabrication scripts
 NV_DEPTH_UM = (80.0, 90.0)
 NV_SPECTRUM_NM = (650.0, 850.0)
 
+# A printed cap is an optical surface only where its own core illuminates it.
+# fit_surface constrains roughly one beam footprint, so an aperture far beyond
+# that is unconstrained polynomial extrapolation: it can sculpt the polymer
+# union, shadow the neighbouring caps, and move the reported apex into a region
+# no light ever reaches.  The aperture is therefore derived from the beam
+# footprint rather than searched freely, and every cap must additionally remain
+# the exposed boundary over its own illuminated footprint.
+APERTURE_MARGIN = 1.35   # cap radius / beam footprint, upper limit
+EXPOSURE_MIN = 0.85      # min fraction of the lit footprint a cap must own
+CLEARANCE_TOL = 0.5      # max (optical clearance - apex) / footprint
+
+# Printability guard only: a height field cannot overhang, so this just keeps
+# the rim off a near-vertical wall.  It is deliberately NOT set at the
+# IP-S->air critical angle (41.1 deg, slope 0.87): a convex cap is steep at its
+# rim by nature, that bound admits only ~6% of otherwise valid designs, and
+# rays past the critical angle are already given zero transmission by
+# _fresnel_refract.  The loss is therefore priced by the objective and reported
+# as tir_fraction rather than forbidden here.
+MAX_SURFACE_SLOPE = 3.0   # tan of the steepest allowed tilt (~72 deg)
+MIN_POLYMER_UM = 5.0      # thinnest polymer left between a cap and its base
+# The integration grid is snapped to this ladder so that two nearby candidates
+# share an identical grid.  Without it the mesh pitch tracked each candidate's
+# own beam width and the 1-um refinement partly chased discretization noise.
+FIELD_LIMIT_QUANTUM_UM = 5.0
+FIELD_LIMIT_MAX_UM = 140.0
+
 
 def _spectral_quadrature(points):
     """Normalized trapezoidal quadrature of the NV spectrum over 650--850 nm."""
@@ -132,6 +158,55 @@ def surface_z(surface, x, y):
                     surface["apex"] + sag, np.inf)
 
 
+def beam_footprint(height):
+    """Radius a core's full-NA beam covers after ``height`` of polymer.
+
+    Launch positions span 2*W_MODE across the mode field (``trace_full_na``),
+    and every ray then diverges at the full-NA half angle inside the IP-S.
+    """
+    return 2.0*W_MODE + max(float(height), 0.0)*np.tan(
+        np.arcsin(MCF_FULL_NA/MCF_IPS_N))
+
+
+def lit_radius(surface):
+    """Illuminated footprint radius of one printed cap."""
+    return beam_footprint(surface["base_z"]-surface["apex"])
+
+
+def optical_clearance(surface):
+    """Lowest point of the cap inside the footprint its own core lights.
+
+    ``apex`` is the minimum over the whole aperture, which is only the
+    clearance the beam sees when the cap is sized to its own footprint.
+    Reported alongside the apex so the two can never be silently conflated.
+    """
+    er = _frame(surface)[0]
+    qx, qy, _ = _disk(41)
+    points = surface["core_r"]*er + lit_radius(surface)*np.column_stack([qx, qy])
+    z = surface_z(surface, points[:, 0], points[:, 1])
+    z = z[np.isfinite(z)]
+    return float(z.min()) if z.size else float("inf")
+
+
+def exposure_fraction(index, all_surfaces, tol=1e-6):
+    """Fraction of a cap's lit footprint on which it is the exposed boundary.
+
+    Rays refract off whichever surface of the printed union is lowest.  A cap
+    that loses this fraction is not the optic its own core is using.
+    """
+    surface = all_surfaces[index]
+    er = _frame(surface)[0]
+    qx, qy, _ = _disk(25)
+    points = surface["core_r"]*er + lit_radius(surface)*np.column_stack([qx, qy])
+    z_self = surface_z(surface, points[:, 0], points[:, 1])
+    exposed = np.isfinite(z_self)
+    for other_index, other in enumerate(all_surfaces):
+        if other_index == index:
+            continue
+        exposed &= z_self <= surface_z(other, points[:, 0], points[:, 1])+tol
+    return float(exposed.mean())
+
+
 def _gaussian_input(surface, points, lam_nm):
     """Gaussian mode wavefront incident on the printed surface from its core."""
     lam = lam_nm * 1e-3
@@ -152,7 +227,9 @@ def _desired_air(points, target_depth, n_dia):
     rho = np.hypot(points[:, 0], points[:, 1])
     lo = np.zeros_like(rho)
     hi = np.full_like(rho, np.arcsin(1.0 / n_dia) - 1e-9)
-    for _ in range(55):
+    # 34 halvings take a <0.5 rad bracket below 1e-10 rad; 55 was far past
+    # double precision and this is the inner loop of every surface fit.
+    for _ in range(34):
         td = 0.5 * (lo + hi)
         ta = np.arcsin(np.clip(n_dia * np.sin(td), -1.0, 1.0))
         reached = target_depth * np.tan(td) + points[:, 2] * np.tan(ta)
@@ -376,7 +453,9 @@ def trace_full_na(surface, all_surfaces, lam_nm, depths=SEARCH_DEPTHS,
 
     lo = np.zeros(len(origins))
     hi = (origins[:, 2]+10.0)/np.maximum(-incident[:, 2], 1e-12)
-    for _ in range(44):
+    # 30 halvings resolve a 300-um bracket to <1e-6 um, well inside the
+    # geometry tolerance; this bisection dominates the whole search cost.
+    for _ in range(30):
         mid = 0.5*(lo+hi)
         trial = origins+mid[:, None]*incident
         boundary_z = _union_boundary_arrays(
@@ -409,8 +488,15 @@ def trace_full_na(surface, all_surfaces, lam_nm, depths=SEARCH_DEPTHS,
                        dia@diamond_normal, out=np.full(len(points), np.nan),
                        where=dia@diamond_normal > 1e-12)
         hits.append(at_surface+td[:, None]*dia)
+    # Share of the launched power turned back at the polymer->air surface,
+    # i.e. rays meeting the cap past the critical angle.  Priced by the
+    # objective through the zero transmission, surfaced here so a design that
+    # buys its spot size by vignetting its own rim is visible rather than
+    # merely implied.
+    launched = max(float(launch_weight.sum()), 1e-30)
+    tir_fraction = float((launch_weight*(~ok1)).sum())/launched
     return dict(origins=origins, points=points, air_surface=at_surface,
-                hits=np.asarray(hits), weight=weight,
+                hits=np.asarray(hits), weight=weight, tir_fraction=tir_fraction,
                 throughput=float(weight.sum()), valid=valid,
                 incident=incident, air=air, diamond=dia,
                 mode_width=W_MODE, surface_normal=normal,
@@ -491,6 +577,22 @@ def trace_na_cone(surface, all_surfaces, lam_nm, fiber_na=MCF_FULL_NA,
                 fiber_na=float(fiber_na), depth=float(depth))
 
 
+def _divergence_angle(trace, valid):
+    """Power-weighted RMS cone angle inside the diamond.
+
+    This sets the diffraction floor.  It replaces a 90th-percentile of the ray
+    angles, which is a discrete order statistic: it stepped whenever a single
+    ray entered or left the valid set, so the objective carried small jumps
+    that the 1-um refinement could chase.  The second moment is smooth in the
+    geometry and is the usual definition of beam divergence.
+    """
+    weight = trace["weight"][valid]
+    angle = np.arccos(np.clip(
+        trace["diamond"][valid] @ trace["diamond_normal"], -1.0, 1.0))
+    total = max(float(weight.sum()), 1e-30)
+    return max(float(np.sqrt((weight*angle*angle).sum()/total)), 1e-4)
+
+
 def beam_stats(trace, lam_nm, depths=SEARCH_DEPTHS):
     """Weighted Gaussian-equivalent footprint, including the diffraction floor."""
     valid = (trace["valid"] & np.isfinite(trace["weight"]) &
@@ -504,10 +606,7 @@ def beam_stats(trace, lam_nm, depths=SEARCH_DEPTHS):
     tilt = np.deg2rad(float(trace.get("tilt_deg", 0.0)))
     tangent_x = np.array([np.cos(tilt), 0.0, np.sin(tilt)])
     tangent_y = np.array([0.0, 1.0, 0.0])
-    diamond_normal = np.array([np.sin(tilt), 0.0, -np.cos(tilt)])
-    angle = np.arccos(np.clip(
-        trace["diamond"][valid] @ diamond_normal, -1.0, 1.0))
-    theta = max(float(np.percentile(angle, 90)), 1e-4)
+    theta = _divergence_angle(trace, valid)
     w_diff = (lam_nm*1e-3) / (np.pi*n_dia*np.sin(theta))
     for d, h in zip(np.atleast_1d(depths), trace["hits"]):
         h = h[valid]
@@ -557,12 +656,27 @@ def _ray_density(trace, depth_index, axis, lam_nm, rotations=(0.0,)):
                   weights[inside]*fraction[inside])
 
     n_dia = float(diamond_sellmeier(lam_nm/1000.0))
-    diamond_normal = trace["diamond_normal"]
-    angle = np.arccos(np.clip(trace["diamond"][valid] @ diamond_normal, -1.0, 1.0))
-    theta = max(float(np.percentile(angle, 90)), 1e-4)
+    theta = _divergence_angle(trace, valid)
     diffraction_sigma = (lam_nm*1e-3)/(2*np.pi*n_dia*np.sin(theta))
     return gaussian_filter(
         density, diffraction_sigma/dx, mode="constant")/(dx*dx)
+
+
+def _field_axis(all_stats, grid_n):
+    """Shared transverse grid for the field integral.
+
+    The extent still follows the beam so a tight spot stays resolved, but it is
+    snapped to a fixed ladder: two candidates whose footprints differ slightly
+    then integrate on exactly the same mesh, so their scores differ by optics
+    rather than by discretization.  Used by every consumer of the field, which
+    is what makes evaluate_design and combined_overlap_volume agree.
+    """
+    raw = max(5.0, max(np.max(np.abs(row["mean"]))+5.0*row["fwhm"]
+                       for row in all_stats))
+    limit = FIELD_LIMIT_QUANTUM_UM*np.ceil(
+        min(raw, FIELD_LIMIT_MAX_UM)/FIELD_LIMIT_QUANTUM_UM)
+    limit = float(min(limit, FIELD_LIMIT_MAX_UM))
+    return np.linspace(-limit, limit, int(grid_n))
 
 
 def _combined_overlap_plane(central_trace, side_traces, depth_index, axis):
@@ -571,6 +685,8 @@ def _combined_overlap_plane(central_trace, side_traces, depth_index, axis):
         central_trace, depth_index, axis, 532.0)
     sat = intensity/I_SAT
     excitation_rate = R_SAT*sat/(1.0+sat)
+
+    max_saturation = float(sat.max()) if sat.size else 0.0
 
     collection = np.zeros((len(axis), len(axis)))
     for lam, spectral_weight, traces in side_traces:
@@ -588,7 +704,16 @@ def _combined_overlap_plane(central_trace, side_traces, depth_index, axis):
             density = sum(_ray_density(trace, depth_index, axis, lam)
                           for trace in traces)
         collection += spectral_weight*collection_area*density
-    return RHO*excitation_rate*np.minimum(collection, 1.0)
+    # Clamping a collection probability at 1 is correct, but it also flattens
+    # the objective wherever it bites, so report how much of the signal it
+    # touched instead of applying it silently.
+    clamped = collection > 1.0
+    signal = RHO*excitation_rate*np.minimum(collection, 1.0)
+    total = float(signal.sum())
+    clamped_share = (float(signal[clamped].sum())/total
+                     if total > 0.0 and clamped.any() else 0.0)
+    return signal, dict(max_saturation=max_saturation,
+                        clamped_signal_fraction=clamped_share)
 
 
 def combined_overlap_volume(central, side, grid_n=101, tilt_deg=0.0,
@@ -623,11 +748,9 @@ def combined_overlap_volume(central, side, grid_n=101, tilt_deg=0.0,
 
     all_stats = central_stats + [
         row for _, _, groups in side_stats for rows in groups for row in rows]
-    limit = max(5.0, max(np.max(np.abs(row["mean"])) + 5.0*row["fwhm"]
-                         for row in all_stats))
-    axis = np.linspace(-min(limit, 140.0), min(limit, 140.0), int(grid_n))
+    axis = _field_axis(all_stats, grid_n)
     signal = np.stack([
-        _combined_overlap_plane(central_trace, side_traces, iz, axis)
+        _combined_overlap_plane(central_trace, side_traces, iz, axis)[0]
         for iz in range(len(depths))])
 
     dx = axis[1]-axis[0]
@@ -674,18 +797,17 @@ def surface_limits(surface):
                 print_height=float(surface["base_z"] - surface["apex"] - sag.min()))
 
 
-def candidate_merit(surface, role):
-    """Cheap physical merit used only to shortlist surfaces."""
-    if role == "central":
-        tr = trace_full_na(surface, [surface], 532.0)
-        st = beam_stats(tr, 532.0)
-        return np.mean([x["throughput"] / max(x["fwhm"]**2, 1e-12) for x in st])
-    vals = []
-    for lam, sw in zip(SEARCH_RED_LAM, SEARCH_RED_W):
-        tr = trace_full_na(surface, [surface], lam)
-        st = beam_stats(tr, lam)
-        vals.append(sw*np.mean([x["throughput"] / max(x["fwhm"]**2, 1e-12) for x in st]))
-    return float(np.sum(vals))
+# Screening stage: the same objective at reduced fidelity, rather than a
+# separate hand-built merit.  The previous throughput/FWHM^2 heuristic ranked
+# designs with rank correlation +0.07 against the objective it fed -- its best
+# fifth overlapped the true best fifth no better than chance -- so it steered
+# the expensive stage with essentially no information.  Coarsening the real
+# objective instead keeps 7.6x of the speed at rank correlation +0.68.
+PROXY_DEPTHS = np.linspace(*NV_DEPTH_UM, 3)
+PROXY_RED_LAM = np.array([750.0])      # band centre
+PROXY_RED_W = np.array([1.0])
+PROXY_GRID_N = 41
+PROXY_RAY_GRID = 17
 
 
 def evaluate_design(central, side, grid_n=121, tilt_deg=0.0, depths=DEPTHS,
@@ -718,18 +840,21 @@ def evaluate_design(central, side, grid_n=121, tilt_deg=0.0, depths=DEPTHS,
         side_traces.append((lam, sw, traces))
 
     all_stats = cstats + [x for _, _, groups in sstats for rows in groups for x in rows]
-    lim = max(5.0, max(np.max(np.abs(x["mean"])) + 5.0*x["fwhm"]
-                       for x in all_stats))
-    lim = min(lim, 140.0)
-    axis = np.linspace(-lim, lim, grid_n)
+    axis = _field_axis(all_stats, grid_n)
     x, y = np.meshgrid(axis, axis, indexing="xy")
     dx = axis[1]-axis[0]
     dz = float(depths[-1]-depths[0])/(len(depths)-1)
     photons = 0.0
     moments = np.zeros(6)  # W, Wx, Wy, Wxx, Wyy, Wxy
+    max_saturation = 0.0
+    clamped_fraction = 0.0
 
     for iz, depth in enumerate(depths):
-        sig = _combined_overlap_plane(central_trace, side_traces, iz, axis)
+        sig, plane_diag = _combined_overlap_plane(
+            central_trace, side_traces, iz, axis)
+        max_saturation = max(max_saturation, plane_diag["max_saturation"])
+        clamped_fraction = max(clamped_fraction,
+                               plane_diag["clamped_signal_fraction"])
         volume = dx*dx*dz*(0.5 if iz in (0, len(depths)-1) else 1.0)
         photons += sig.sum()*volume
         ww = sig*volume
@@ -756,6 +881,12 @@ def evaluate_design(central, side, grid_n=121, tilt_deg=0.0, depths=DEPTHS,
                 raw_model_sensitivity_nt=float(raw_sensitivity),
                 comparison_normalized_sensitivity_nt=float(normalized_sensitivity),
                 tilt_deg=float(tilt_deg),
+                max_saturation=float(max_saturation),
+                clamped_signal_fraction=float(clamped_fraction),
+                central_tir_fraction=float(central_trace["tir_fraction"]),
+                side_tir_fraction=float(max(
+                    trace["tir_fraction"]
+                    for _, _, traces in side_traces for trace in traces)),
                 central_stats=cstats, side_stats=sstats)
 
 
@@ -805,12 +936,21 @@ def alignment_sweep(design, gaps_um, angles_deg, grid_n=81):
 
 
 SEARCH_GEOMETRY_NAMES = (
-    "air_gap_um", "central_height_um", "side_height_um",
-    "central_aperture_um", "central_side_overlap_um", "side_core_offset_um",
+    "air_gap_um", "central_height_um", "side_height_um", "side_core_offset_um",
 )
+# Bounds are held to the region the 300-um print box and the cap-sizing rule
+# can actually reach.  A post tall enough to throw a footprint wider than the
+# 35-um core pitch makes its cap shadow its neighbours, so the old 295-um
+# height ceilings only ever produced rejected candidates.
 SEARCH_GEOMETRY_BOUNDS = (
-    (5, 295), (5, 295), (5, 295), (5, 150), (0, 290), (-30, 110),
+    (5, 250), (5, 200), (5, 120), (-30, 110),
 )
+# Apertures are searched as a multiple of each cap's own beam footprint, so a
+# candidate can never be fitted over one region and used over a much larger
+# one.  The central/side overlap is then a reported consequence of the cap
+# sizes and the core pitch, not a free parameter that can drive them apart.
+SEARCH_APERTURE_NAMES = ("central_aperture_scale", "side_aperture_scale")
+SEARCH_APERTURE_BOUNDS = ((1.0, APERTURE_MARGIN), (1.0, APERTURE_MARGIN))
 FAMILY_SHAPE_PARAMETERS = {
     "quadratic": ("radius_scale",),
     "spherical": ("radius_scale",),
@@ -874,13 +1014,13 @@ def _apply_shape_parameters(surface, values):
 def _search_spec(central_family, side_family):
     central_names = _shape_names(central_family, "central")
     side_names = _shape_names(side_family, "side")
-    names = (SEARCH_GEOMETRY_NAMES +
+    names = (SEARCH_GEOMETRY_NAMES + SEARCH_APERTURE_NAMES +
              tuple(f"central_{name}" for name in central_names) +
              tuple(f"side_{name}" for name in side_names))
-    bounds = (SEARCH_GEOMETRY_BOUNDS +
+    bounds = (SEARCH_GEOMETRY_BOUNDS + SEARCH_APERTURE_BOUNDS +
               tuple(SHAPE_BOUNDS[name] for name in central_names) +
               tuple(SHAPE_BOUNDS[name] for name in side_names))
-    x0 = np.r_[25.0, 200.0, 165.0, 20.0, 3.0, 0.0,
+    x0 = np.r_[25.0, 51.0, 51.0, 0.0, 1.03, 1.09,
                 np.ones(len(central_names)+len(side_names))]
     integrality = np.r_[np.ones(len(SEARCH_GEOMETRY_NAMES), dtype=bool),
                         np.zeros(len(names)-len(SEARCH_GEOMETRY_NAMES), dtype=bool)]
@@ -897,10 +1037,13 @@ def _search_surfaces(parameters, central_family, side_family):
     gap = values["air_gap_um"]
     central_height = values["central_height_um"]
     side_height = values["side_height_um"]
-    central_aperture = values["central_aperture_um"]
-    overlap = values["central_side_overlap_um"]
     center = CORE_R + values["side_core_offset_um"]
-    side_aperture = center + overlap - central_aperture
+    # Each cap is sized to the footprint its own core lights, so the fitted
+    # region and the physical aperture coincide.  A decentered side cap must
+    # additionally reach back over its core, hence the decenter term.
+    decenter = abs(center - CORE_R)
+    central_aperture = values["central_aperture_scale"]*beam_footprint(central_height)
+    side_aperture = decenter + values["side_aperture_scale"]*beam_footprint(side_height)
     base_z = gap + central_height
     side_apex = base_z - side_height
     if (any(value < lower-1e-12 or value > upper+1e-12
@@ -925,19 +1068,51 @@ def _search_surfaces(parameters, central_family, side_family):
     side = _apply_shape_parameters(side, zip(side_names, parameters[offset:]))
     for surface in (central, side):
         limits = surface_limits(surface)
-        if (limits["min_z"] < 5.0 or limits["max_z"] >= surface["base_z"] or
+        if (limits["min_z"] < 5.0 or
+                # leave real polymer between the cap and its base rather than
+                # pinching it to a sliver that cannot be printed
+                limits["max_z"] > surface["base_z"]-MIN_POLYMER_UM or
                 limits["max_z"] > PRINT_Z_UM or
-                limits["print_height"] > PRINT_Z_UM):
+                limits["print_height"] > PRINT_Z_UM or
+                # a wall past the critical angle reflects the light that
+                # reaches it, and will not print cleanly either
+                limits["max_slope"] > MAX_SURFACE_SLOPE):
+            return None
+    # Rays refract off whichever surface of the printed union sits lowest, so a
+    # cap that is shadowed over its own lit footprint is not the optic its core
+    # actually uses.  Reject those before paying for a trace.
+    union = replicated_surfaces(central, side)
+    if (exposure_fraction(0, union) < EXPOSURE_MIN or
+            exposure_fraction(1, union) < EXPOSURE_MIN):
+        return None
+    # The apex is what gets reported as the air gap, so it has to stay close to
+    # the clearance the beam actually sees.  Checked here as well as in
+    # validate_design so the search can never select a design the exporter
+    # would reject.
+    for surface in (central, side):
+        if (optical_clearance(surface) >
+                surface["apex"]+CLEARANCE_TOL*lit_radius(surface)):
             return None
     return central, side
 
 
 def design_parameters(central, side):
-    """Return the independent geometry and derived overlap in report units."""
+    """Return the independent geometry and derived quantities in report units.
+
+    ``air_gap_um`` is the apex, i.e. the closest approach of the whole cap to
+    the diamond.  ``*_optical_clearance_um`` is the closest approach inside the
+    footprint the core actually lights, which is the distance the beam sees.
+    The two coincide only while each cap stays sized to its own footprint, so
+    both are reported and ``validate_design`` checks they agree.
+    """
     return {
         "central_lens_type": central["family"],
         "side_lens_type": side["family"],
         "air_gap_um": float(central["apex"]),
+        "central_optical_clearance_um": float(optical_clearance(central)),
+        "side_optical_clearance_um": float(optical_clearance(side)),
+        "central_lit_radius_um": float(lit_radius(central)),
+        "side_lit_radius_um": float(lit_radius(side)),
         "central_side_overlap_um": float(
             central["aperture"] + side["aperture"] - side["center_r"]),
         "side_side_overlap_um": float(
@@ -963,15 +1138,16 @@ def _search_objective_cached(parameters, central_family, side_family, stage):
             result = evaluate_design(
                 central, side, grid_n=81, depths=SEARCH_DEPTHS,
                 red_lam=SEARCH_RED_LAM, red_w=SEARCH_RED_W, ray_grid=31)
-            merit = result["raw_model_sensitivity_nt"]
-            return merit if np.isfinite(merit) else np.inf
-        cm = candidate_merit(central, "central")
-        sm = candidate_merit(side, "side")
-        union = replicated_surfaces(central, side)
-        ct = trace_full_na(central, union, 532.0, n_grid=25)
-        st = trace_full_na(side, union, 750.0, n_grid=25)
-        merit = cm*sm*ct["throughput"]*st["throughput"]
-        return -merit if np.isfinite(merit) and merit > 0.0 else np.inf
+        else:
+            result = evaluate_design(
+                central, side, grid_n=PROXY_GRID_N, depths=PROXY_DEPTHS,
+                red_lam=PROXY_RED_LAM, red_w=PROXY_RED_W,
+                ray_grid=PROXY_RAY_GRID)
+        # Both stages now minimize the same quantity, so the screening result
+        # is a usable starting point for the full pass rather than the optimum
+        # of a different function.
+        merit = result["raw_model_sensitivity_nt"]
+        return merit if np.isfinite(merit) else np.inf
     except (FloatingPointError, ValueError, np.linalg.LinAlgError):
         return np.inf
 
@@ -1013,6 +1189,74 @@ def _coordinate_refine(parameters, central_family, side_family):
     return merit, point
 
 
+def _surface_from_json(data):
+    """Rebuild a surface dict written by _surface_json."""
+    surface = dict(data)
+    surface["coef"] = np.asarray(surface["coef"], dtype=float)
+    return surface
+
+
+def _search_signature(families, proxy_maxiter, full_maxiter, popsize, restarts):
+    """Identity of a search configuration.
+
+    A checkpoint is only reusable by an identical configuration.  Resuming a
+    run whose bounds, families or physical constraints have changed would mix
+    results from two different searches into one comparison table, so the
+    signature is stored and checked rather than trusted.
+    """
+    return {"families": list(families), "proxy_maxiter": int(proxy_maxiter),
+            "full_maxiter": int(full_maxiter), "popsize": int(popsize),
+            "restarts": int(restarts),
+            "geometry_bounds": [list(b) for b in SEARCH_GEOMETRY_BOUNDS],
+            "aperture_bounds": [list(b) for b in SEARCH_APERTURE_BOUNDS],
+            "constants": [APERTURE_MARGIN, EXPOSURE_MIN, CLEARANCE_TOL,
+                          MAX_SURFACE_SLOPE, MIN_POLYMER_UM,
+                          FIELD_LIMIT_QUANTUM_UM, MCF_FULL_NA]}
+
+
+def _save_checkpoint(path, signature, done, finalists, method_results):
+    """Persist completed family pairs.  Written atomically.
+
+    A crash during the write would otherwise leave a truncated file that the
+    next run would fail to parse, losing exactly the work being protected.
+    """
+    if not path:
+        return
+    payload = dict(version=1, signature=signature,
+                   done=[list(pair) for pair in sorted(done)],
+                   method_comparison=method_results,
+                   finalists=[dict(merit=float(merit), label=label,
+                                   central=_surface_json(central),
+                                   side=_surface_json(side))
+                              for merit, label, central, side in finalists])
+    temporary = f"{path}.tmp"
+    with open(temporary, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh)
+    os.replace(temporary, path)
+
+
+def _load_checkpoint(path, signature):
+    """Return (done_pairs, finalists, method_results) from a usable checkpoint."""
+    if not path or not os.path.exists(path):
+        return set(), [], {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except (ValueError, OSError):
+        print(f"  checkpoint {path} is unreadable; starting fresh", flush=True)
+        return set(), [], {}
+    if payload.get("signature") != signature:
+        print(f"  checkpoint {path} was written by a different search "
+              "configuration; starting fresh", flush=True)
+        return set(), [], {}
+    finalists = [(row["merit"], row["label"],
+                  _surface_from_json(row["central"]),
+                  _surface_from_json(row["side"]))
+                 for row in payload.get("finalists", [])]
+    return ({tuple(pair) for pair in payload.get("done", [])},
+            finalists, payload.get("method_comparison", {}))
+
+
 class _ProgressBar:
     """Terminal bar, with 10% checkpoints when output is redirected to a log."""
 
@@ -1048,12 +1292,30 @@ class _ProgressBar:
 
 def search_design(families=("quadratic", "asphere", "biconic", "freeform"),
                   proxy_maxiter=120, full_maxiter=80, popsize=8, restarts=2,
-                  workers=-1):
-    """Deterministic global integer search followed by 1-um refinement."""
+                  workers=-1, rescore_count=3, checkpoint=None):
+    """Deterministic global integer search followed by 1-um refinement.
+
+    The family contest is decided on the same resolution the winner is
+    published at: the best ``rescore_count`` candidates are re-evaluated on the
+    final grid before one is selected.
+
+    ``checkpoint`` is a path that, when given, is written after every family
+    pair and read back on start, so an interrupted run resumes instead of
+    repeating hours of completed work.  Delete the file to force a fresh
+    search.  Per-pair seeds come from the position in the family product, not
+    from a counter of executed pairs, so a resumed run reproduces exactly the
+    sequence an uninterrupted one would have produced.
+    """
     families = tuple(families)
     if (not families or min(proxy_maxiter, full_maxiter) < 0 or
-            popsize < 5 or restarts < 1):
+            popsize < 5 or restarts < 1 or rescore_count < 1):
         raise ValueError("invalid search configuration")
+    signature = _search_signature(families, proxy_maxiter, full_maxiter,
+                                  popsize, restarts)
+    completed, finalists, method_results = _load_checkpoint(checkpoint, signature)
+    if completed:
+        print(f"resuming from {checkpoint}: {len(completed)} of "
+              f"{len(families)**2} family pairs already done", flush=True)
     worker_pool = None
     worker_map = 1
     if workers != 1:
@@ -1061,11 +1323,28 @@ def search_design(families=("quadratic", "asphere", "biconic", "freeform"),
         worker_pool = Pool(None if workers == -1 else workers)
         worker_map = worker_pool.map
 
+    def _evolve(**kwargs):
+        """Run one DE pass, falling back to serial if the worker pool dies.
+
+        A broken pool pipe previously destroyed a multi-hour run outright; the
+        objective is cached and deterministic, so retrying serially costs time
+        rather than correctness.
+        """
+        try:
+            return differential_evolution(workers=worker_map, **kwargs)
+        except Exception as exc:                      # pool died mid-generation
+            print(f"  worker pool failed ({type(exc).__name__}); "
+                  "retrying this pass serially", flush=True)
+            return differential_evolution(workers=1, **kwargs)
+
     best = None
-    method_results = {}
     try:
         for method_index, (central_family, side_family) in enumerate(
                 (c, s) for c in families for s in families):
+            if (central_family, side_family) in completed:
+                print(f"Skipping {central_family} + {side_family} "
+                      "(already in checkpoint)", flush=True)
+                continue
             _, bounds, x0, integrality = _search_spec(
                 central_family, side_family)
             method_best = None
@@ -1075,30 +1354,30 @@ def search_design(families=("quadratic", "asphere", "biconic", "freeform"),
                 print(f"Optimizing {label}, restart {restart+1}/{restarts}...",
                       flush=True)
                 proxy_progress = _ProgressBar(f"{label} proxy", proxy_maxiter)
-                proxy = differential_evolution(
-                    _search_objective, bounds,
+                proxy = _evolve(
+                    func=_search_objective, bounds=bounds,
                     args=(central_family, side_family, "proxy"),
                     strategy="best1bin", maxiter=proxy_maxiter,
                     popsize=popsize, tol=0.0, atol=0.0,
                     mutation=(0.5, 1.0), recombination=0.8,
                     rng=np.random.default_rng(seed), polish=False,
                     init="sobol", x0=x0,
-                    updating="deferred", workers=worker_map,
+                    updating="deferred",
                     integrality=integrality, callback=proxy_progress)
                 proxy_progress.finish()
                 full_progress = _ProgressBar(f"{label} full", full_maxiter)
-                full = differential_evolution(
-                    _search_objective, bounds,
+                full = _evolve(
+                    func=_search_objective, bounds=bounds,
                     args=(central_family, side_family, "full"),
                     strategy="best1bin", maxiter=full_maxiter,
                     popsize=popsize, tol=0.0, atol=0.0,
                     mutation=(0.5, 1.0), recombination=0.8,
                     rng=np.random.default_rng(seed+10_000), polish=False,
                     init="sobol", x0=proxy.x, updating="deferred",
-                    workers=worker_map, integrality=integrality,
+                    integrality=integrality,
                     callback=full_progress)
                 full_progress.finish()
-                print(f"  proxy={-proxy.fun:.6g}, "
+                print(f"  screen={proxy.fun:.6g}, "
                       f"search sensitivity={full.fun:.6g} nT/sqrt(Hz)",
                       flush=True)
                 if method_best is None or full.fun < method_best[0]:
@@ -1108,6 +1387,11 @@ def search_design(families=("quadratic", "asphere", "biconic", "freeform"),
                 method_best[1], central_family, side_family)
             surfaces = _search_surfaces(parameters, central_family, side_family)
             if surfaces is None or not np.isfinite(merit):
+                # still a completed pair: it yields no candidate, and repeating
+                # it after a crash would only burn the same time again.
+                completed.add((central_family, side_family))
+                _save_checkpoint(checkpoint, signature, completed, finalists,
+                                 method_results)
                 continue
             central, side = surfaces
             result = evaluate_design(
@@ -1119,19 +1403,40 @@ def search_design(families=("quadratic", "asphere", "biconic", "freeform"),
                                       "comparison_normalized_sensitivity_nt",
                                       "model_fiber_photons_s",
                                       "comparison_normalized_cps", "resolution_um")}
+            method_results[label]["search_grid_sensitivity_nt"] = float(merit)
             print(f"  refined sensitivity={merit:.6g} nT/sqrt(Hz), "
                   f"parameters={design_parameters(central, side)}", flush=True)
-            if best is None or merit < best[0]:
-                best = (merit, central, side)
+            finalists.append((merit, label, central, side))
+            completed.add((central_family, side_family))
+            _save_checkpoint(checkpoint, signature, completed, finalists,
+                             method_results)
     finally:
         if worker_pool is not None:
             worker_pool.close()
             worker_pool.join()
 
+    # Every score above comes from the coarse search grid.  Ranking on it and
+    # then publishing a fine-grid number let a ~5% quadrature shift decide a
+    # contest whose top entries sat within a few percent of each other, so the
+    # leaders are re-scored at the reporting resolution before one is chosen.
+    # sort on the merit alone: a bare sorted() would fall through to comparing
+    # the surface dicts on a tie, which raises.
+    for merit, label, central, side in sorted(
+            finalists, key=lambda row: row[0])[:rescore_count]:
+        fine = evaluate_design(central, side, grid_n=161)
+        method_results[label]["final_grid_sensitivity_nt"] = float(
+            fine["raw_model_sensitivity_nt"])
+        print(f"  re-scored {label}: {merit:.6g} -> "
+              f"{fine['raw_model_sensitivity_nt']:.6g} nT/sqrt(Hz) at full "
+              "resolution", flush=True)
+        if best is None or fine["raw_model_sensitivity_nt"] < best[0]:
+            best = (fine["raw_model_sensitivity_nt"], central, side, fine)
+
     if best is None:
         raise RuntimeError("search found no manufacturable design")
-    final_result = evaluate_design(best[1], best[2], grid_n=161)
-    return dict(central=best[1], side=best[2], result=final_result,
+    # best[3] is the full-resolution evaluation the winner was chosen on, so
+    # the exported result and the selection criterion are the same number.
+    return dict(central=best[1], side=best[2], result=best[3],
                 parameters=design_parameters(best[1], best[2]),
                 method_comparison=method_results)
 
@@ -1169,6 +1474,27 @@ def write_design_json(design, path):
                                         "80-90 um volume integral of central 532-nm excitation "
                                         "times summed six-side-core 650-850-nm reciprocal collection"),
                                     green_fresnel="included once by trace_full_na",
+                                    aperture_rule=(
+                                        "cap radius = decenter + scale x beam footprint, "
+                                        f"scale in [1.0, {APERTURE_MARGIN}]; the fitted and "
+                                        "physical apertures therefore coincide"),
+                                    exposure_min=EXPOSURE_MIN,
+                                    exposure_rule=(
+                                        "each cap must be the lowest surface of the printed "
+                                        "union over this fraction of its own lit footprint"),
+                                    max_surface_slope=MAX_SURFACE_SLOPE,
+                                    max_surface_slope_rule=(
+                                        "tan of the steepest allowed tilt; bounds both "
+                                        "TIR loss at the rim and printability"),
+                                    min_polymer_um=MIN_POLYMER_UM,
+                                    field_grid_quantum_um=FIELD_LIMIT_QUANTUM_UM,
+                                    field_grid_rule=(
+                                        "integration extent snapped to this ladder so nearby "
+                                        "candidates share one mesh"),
+                                    diffraction_angle="power-weighted RMS cone angle",
+                                    family_choice=(
+                                        "top candidates re-scored on the final grid before "
+                                        "the winner is selected"),
                                     method_search_quadrature_points=9))
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, indent=2)
@@ -1229,12 +1555,25 @@ def validate_design(design):
     assert c["base_z"] <= PRINT_Z_UM+1e-9
     assert c["aperture"] <= PRINT_X_UM/2.0+1e-9
     assert s["center_r"]+s["aperture"] <= PRINT_X_UM/2.0+1e-9
-    for surf in (c, s):
+    union = replicated_surfaces(c, s)
+    for index, surf in ((0, c), (1, s)):
         lim = surface_limits(surf)
         assert lim["print_height"] <= MAX_PRINT+1e-9
         assert lim["min_z"] >= 0.0 and lim["max_z"] <= PRINT_Z_UM+1e-9
-        assert lim["max_z"] < surf["base_z"]
+        assert lim["max_z"] <= surf["base_z"]-MIN_POLYMER_UM+1e-9
+        assert lim["max_slope"] <= MAX_SURFACE_SLOPE+1e-9
         assert np.all(np.isfinite(surf["coef"]))
+        # The cap covers the footprint its core lights, and does not run far
+        # past it into unfitted extrapolation.
+        footprint = lit_radius(surf)
+        decenter = abs(surf["center_r"]-surf["core_r"])
+        assert decenter+footprint <= surf["aperture"]+1e-6
+        assert surf["aperture"] <= decenter+APERTURE_MARGIN*footprint+1e-6
+        # It is also the surface its own core actually refracts off.
+        assert exposure_fraction(index, union) >= EXPOSURE_MIN
+        # With the cap sized to its footprint the apex is the clearance the
+        # beam sees; a large gap between them means extrapolation crept back.
+        assert optical_clearance(surf) <= surf["apex"]+CLEARANCE_TOL*footprint+1e-6
     r = design["result"]
     assert r["model_fiber_photons_s"] > 0
     assert r["comparison_normalized_cps"] > 0
@@ -1246,7 +1585,8 @@ def validate_design(design):
 if __name__ == "__main__":
     out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "figures")
     os.makedirs(out, exist_ok=True)
-    design = search_design()
+    design = search_design(
+        checkpoint=os.path.join(out, "phase3_checkpoint.json"))
     validate_design(design)
     write_design_json(design, os.path.join(out, "mcf_freeform_design.json"))
     ntri = write_binary_stl(design, os.path.join(out, "mcf_freeform_central_one_side.stl"))
