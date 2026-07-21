@@ -1,13 +1,15 @@
 """Search physical lens families and export one-side and full seven-core STLs."""
 import os
 
-from lens_design import (design_parameters, search_design, surface_limits,
+from lens_design import (MCF_FULL_NA, design_parameters, search_design, surface_limits,
                          validate_design, write_binary_stl, write_design_json)
 from paper_figures import OUT
 
 
 def main():
     os.makedirs(OUT, exist_ok=True)
+    print(f"Phase 3 ray model: uniformly filled full NA={MCF_FULL_NA:g} "
+          "for the central core and all six side cores", flush=True)
     design = search_design()
     validate_design(design)
     json_path = os.path.join(OUT, "mcf_freeform_design.json")
@@ -16,6 +18,12 @@ def main():
     write_design_json(design, json_path)
     ntri = write_binary_stl(design, stl_path)
     nfull = write_binary_stl(design, full_stl_path, all_sides=True)
+    from redesign_fig import (full_3d_figure, full_3d_interactive, full_na_figure,
+                              overlap_volume_outputs)
+    overlap = overlap_volume_outputs(design)
+    full_3d_figure(design, overlap)
+    full_3d_interactive(design, overlap)
+    full_na_figure(design, overlap=overlap)
     p = design_parameters(design["central"], design["side"])
     print("optimized geometry:")
     for key in ("central_lens_type", "side_lens_type", "air_gap_um",

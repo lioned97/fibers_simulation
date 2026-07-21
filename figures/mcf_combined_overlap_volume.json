@@ -1,0 +1,21 @@
+{
+  "definition": "central 532-nm excitation rate times summed six-side-core 650-850-nm reciprocal collection",
+  "depth_range_um": [
+    80.0,
+    90.0
+  ],
+  "integrated_signal_photons_s": 6950710.783309558,
+  "peak_signal_density_photons_s_um3": 81792.32680049917,
+  "centroid_xyz_um": [
+    -5.679043984847347e-13,
+    -5.683454415269124e-13,
+    -85.00003847505096
+  ],
+  "rms_xyz_um": [
+    0.6792491984785757,
+    0.6723465969012641,
+    2.8894656571692683
+  ],
+  "half_max_volume_um3": 78.40000000000063,
+  "half_max_threshold_relative": 0.5
+}

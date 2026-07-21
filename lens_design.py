@@ -27,6 +27,9 @@ from sensitivity import MEASURED, linewidth_from_resolution, calibrated_sensitiv
 N_AIR = 1.0
 CORE_R = 35.0
 W_MODE = MCF_MFD / 2.0
+MCF_FULL_NA = float(os.environ.get("MCF_FULL_NA", "0.22"))
+if not 0.0 < MCF_FULL_NA < MCF_IPS_N:
+    raise ValueError("MCF_FULL_NA must be between 0 and the IP-S index")
 PRINT_X_UM = PRINT_Y_UM = PRINT_Z_UM = 300.0
 MAX_PRINT = PRINT_Z_UM  # compatibility name used by the fabrication scripts
 NV_DEPTH_UM = (80.0, 90.0)
@@ -188,7 +191,7 @@ def _fit_matrix(family, x, y):
 
 def fit_surface(family, role, gap, base_height, aperture, center_r=0.0,
                 side_offset=0.0, target_depth=85.0):
-    """Fit a physical Snell surface for a core-to-target wavefront."""
+    """Fit a physical Snell surface from a full-NA core to the target."""
     surface = dict(family=family, role=role, center_r=float(center_r), angle=0.0,
                    core_r=0.0 if role == "central" else CORE_R,
                    apex=float(gap + (side_offset if role == "side" else 0.0)),
@@ -196,15 +199,29 @@ def fit_surface(family, role, gap, base_height, aperture, center_r=0.0,
                    coef=np.zeros(8), shift=0.0)
     lam = 532.0 if role == "central" else 750.0
     n_dia = float(diamond_sellmeier(lam / 1000.0))
-    xx, yy, _ = _disk(27)
-    u, v = aperture * xx, aperture * yy
     er, et, center = _frame(surface)
-    xy = center + u[:, None]*er + v[:, None]*et
+    core_xy = surface["core_r"]*er
+    origin = np.r_[core_xy, surface["base_z"]]
+    theta_max = np.arcsin(MCF_FULL_NA/MCF_IPS_N)
+    fit_radius = max(5.0, 1.15*(surface["base_z"]-surface["apex"])*np.tan(theta_max))
+    qx, qy, _ = _disk(27)
+    xy_all = core_xy + fit_radius*np.column_stack([qx, qy])
+    local = xy_all-center
+    u_all, v_all = local@er, local@et
+    inside = u_all*u_all+v_all*v_all <= aperture*aperture
+    u, v, xy = u_all[inside], v_all[inside], xy_all[inside]
+    if len(u) < 20:
+        raise ValueError("lens aperture does not intercept enough of the full-NA cone")
+    xx, yy = u/aperture, v/aperture
 
     for _ in range(4):
         sag = _sag_grad(surface, u, v)[0]
         points = np.column_stack([xy, surface["apex"] + sag])
-        inc, weight, _ = _gaussian_input(surface, points, lam)
+        offset = points-origin
+        distance_sq = np.sum(offset*offset, axis=1)
+        inc = _unit(offset)
+        weight = np.maximum(-inc[:, 2], 0.0)/np.maximum(distance_sq, 1e-12)
+        weight /= max(float(weight.max()), 1e-30)
         desired = _desired_air(points, target_depth, n_dia)
         normal = _unit(MCF_IPS_N * inc - N_AIR * desired)
         normal = np.where((normal[:, 2] > 0)[:, None], -normal, normal)
@@ -233,11 +250,25 @@ def replicated_surfaces(central, side):
 def trace_mode(surface, all_surfaces, lam_nm, depths=SEARCH_DEPTHS, n_grid=31,
                tilt_deg=0.0):
     """Trace the core mode through the exposed part of one physical surface."""
-    qx, qy, da = _disk(n_grid)
+    # Sample the illuminated Gaussian mode, not the potentially 300-um lens
+    # diameter.  The old aperture-wide grid could have 10-um spacing for a
+    # 10-um MFD and therefore mis-integrate the optical power.
     a = surface["aperture"]
-    u, v = a*qx, a*qy
     er, et, center = _frame(surface)
-    xy = center + u[:, None]*er + v[:, None]*et
+    lam = lam_nm*1e-3
+    height = surface["base_z"]-surface["apex"]
+    rayleigh = np.pi*MCF_IPS_N*W_MODE**2/lam
+    mode_width = W_MODE*np.sqrt(1.0+(height/rayleigh)**2)
+    sample_axis = np.linspace(-3.5*mode_width, 3.5*mode_width, int(n_grid))
+    sx, sy = np.meshgrid(sample_axis, sample_axis, indexing="xy")
+    core_xy = surface["core_r"]*er
+    xy_all = core_xy + np.column_stack([sx.ravel(), sy.ravel()])
+    local = xy_all-center
+    u_all, v_all = local@er, local@et
+    illuminated = u_all*u_all+v_all*v_all <= a*a
+    u, v, xy = u_all[illuminated], v_all[illuminated], xy_all[illuminated]
+    if not len(u):
+        raise ValueError("lens aperture does not intercept the fiber mode")
     sag, gx, gy = _sag_grad(surface, u, v)
     p = np.column_stack([xy, surface["apex"] + sag])
     z_self = p[:, 2]
@@ -260,7 +291,7 @@ def trace_mode(surface, all_surfaces, lam_nm, depths=SEARCH_DEPTHS, n_grid=31,
     dia, t2, ok2 = _fresnel_refract(
         air, np.tile(diamond_normal, (len(p), 1)), N_AIR, n_dia)
     valid = visible & ok1 & ok2 & (denominator > 0.0) & (dt >= 0.0)
-    area = da*a*a
+    area = (sample_axis[1]-sample_axis[0])**2
     norm_power = 0.5*np.pi*width*width
     weight = mode * area / norm_power * t1 * t2 * valid
     hits = []
@@ -275,9 +306,198 @@ def trace_mode(surface, all_surfaces, lam_nm, depths=SEARCH_DEPTHS, n_grid=31,
                 tilt_deg=float(tilt_deg))
 
 
+def _union_boundary_arrays(all_surfaces, base_z, x, y):
+    """Vectorized exposed polymer-union surface and outward normal."""
+    x, y = np.atleast_1d(x).astype(float), np.atleast_1d(y).astype(float)
+    best_z = np.full(len(x), float(base_z)-8.0)
+    best_normal = np.tile([0.0, 0.0, -1.0], (len(x), 1))
+    for candidate in all_surfaces:
+        u, v = _local(candidate, x, y)
+        sag, gx, gy = _sag_grad(candidate, u, v)
+        candidate_z = np.where(
+            u*u+v*v <= candidate["aperture"]**2,
+            candidate["apex"]+sag, np.inf)
+        lower = candidate_z < best_z
+        if not np.any(lower):
+            continue
+        er, et, _ = _frame(candidate)
+        grad = gx[:, None]*er+gy[:, None]*et
+        candidate_normal = _unit(
+            np.column_stack([grad, -np.ones(len(x))]))
+        best_z = np.where(lower, candidate_z, best_z)
+        best_normal = np.where(lower[:, None], candidate_normal, best_normal)
+    return best_z, best_normal
+
+
+def _union_boundary(all_surfaces, base_z, x, y):
+    z, normal = _union_boundary_arrays(all_surfaces, base_z, [x], [y])
+    return float(z[0]), normal[0]
+
+
+def trace_full_na(surface, all_surfaces, lam_nm, depths=SEARCH_DEPTHS,
+                  n_grid=31, tilt_deg=0.0, fiber_na=MCF_FULL_NA):
+    """Trace the Gaussian core area with a uniformly filled full-NA cone."""
+    if not 0.0 < fiber_na < MCF_IPS_N or n_grid < 9:
+        raise ValueError("invalid full-NA trace configuration")
+    er, _, _ = _frame(surface)
+    core_xy = surface["core_r"]*er
+
+    # Thirteen Gaussian-weighted positions across the 10-um MFD, combined
+    # with equal-solid-angle angular cells.  Total rays stay comparable to the
+    # old aperture grid so the exhaustive search remains practical.
+    px, py, _ = _disk(5)
+    position_xy = core_xy+2.0*W_MODE*np.column_stack([px, py])
+    position_weight = np.exp(-2.0*(px*px+py*py)*4.0)
+    position_weight /= position_weight.sum()
+
+    n_radial = max(3, int(round(n_grid/8)))
+    n_phi = max(12, int(round(n_grid/2)))
+    theta_max = float(np.arcsin(fiber_na/MCF_IPS_N))
+    mu_edges = np.linspace(np.cos(theta_max), 1.0, n_radial+1)
+    mu = 0.5*(mu_edges[:-1]+mu_edges[1:])
+    directions, theta_rows = [], []
+    for ring, cos_theta in enumerate(mu):
+        theta = float(np.arccos(cos_theta))
+        phi = 2*np.pi*(np.arange(n_phi)+0.5*(ring % 2))/n_phi
+        directions.append(np.column_stack([
+            np.sin(theta)*np.cos(phi), np.sin(theta)*np.sin(phi),
+            np.full(n_phi, -cos_theta)]))
+        theta_rows.append(np.full(n_phi, theta))
+    directions = np.vstack(directions)
+    theta_rows = np.concatenate(theta_rows)
+    n_angles = len(directions)
+    origins = np.repeat(
+        np.column_stack([position_xy,
+                         np.full(len(position_xy), surface["base_z"])]),
+        n_angles, axis=0)
+    incident = np.tile(directions, (len(position_xy), 1))
+    launch_theta = np.tile(theta_rows, len(position_xy))
+    launch_weight = np.repeat(position_weight, n_angles)/n_angles
+
+    lo = np.zeros(len(origins))
+    hi = (origins[:, 2]+10.0)/np.maximum(-incident[:, 2], 1e-12)
+    for _ in range(44):
+        mid = 0.5*(lo+hi)
+        trial = origins+mid[:, None]*incident
+        boundary_z = _union_boundary_arrays(
+            all_surfaces, surface["base_z"], trial[:, 0], trial[:, 1])[0]
+        above = trial[:, 2] > boundary_z
+        lo = np.where(above, mid, lo)
+        hi = np.where(above, hi, mid)
+    distance = 0.5*(lo+hi)
+    points = origins+distance[:, None]*incident
+    boundary_z, normal = _union_boundary_arrays(
+        all_surfaces, surface["base_z"], points[:, 0], points[:, 1])
+    points[:, 2] = boundary_z
+    air, t1, ok1 = _fresnel_refract(
+        incident, normal, MCF_IPS_N, N_AIR)
+
+    tilt = np.deg2rad(float(tilt_deg))
+    diamond_normal = np.array([np.sin(tilt), 0.0, -np.cos(tilt)])
+    denominator = air@diamond_normal
+    dt = np.divide(-(points@diamond_normal), denominator,
+                   out=np.full(len(points), np.nan), where=denominator > 1e-12)
+    at_surface = points+dt[:, None]*air
+    n_dia = float(diamond_sellmeier(lam_nm/1000.0))
+    dia, t2, ok2 = _fresnel_refract(
+        air, np.tile(diamond_normal, (len(points), 1)), N_AIR, n_dia)
+    valid = ok1 & ok2 & (denominator > 0.0) & np.isfinite(dt) & (dt >= 0.0)
+    weight = launch_weight*t1*t2*valid
+    hits = []
+    for depth in np.atleast_1d(depths):
+        td = np.divide(float(depth)-at_surface@diamond_normal,
+                       dia@diamond_normal, out=np.full(len(points), np.nan),
+                       where=dia@diamond_normal > 1e-12)
+        hits.append(at_surface+td[:, None]*dia)
+    return dict(origins=origins, points=points, air_surface=at_surface,
+                hits=np.asarray(hits), weight=weight,
+                throughput=float(weight.sum()), valid=valid,
+                incident=incident, air=air, diamond=dia,
+                mode_width=W_MODE, surface_normal=normal,
+                diamond_normal=diamond_normal, tilt_deg=float(tilt_deg),
+                launch_theta=launch_theta, theta_max=theta_max,
+                fiber_na=float(fiber_na), ray_model="uniform_full_na")
+
+
+def trace_na_cone(surface, all_surfaces, lam_nm, fiber_na=MCF_FULL_NA,
+                  depth=85.0, n_theta=5, n_phi=18):
+    """Trace an unweighted geometric full-NA envelope from one core.
+
+    This draws the cone boundary/interior for visualization. Phase 3 uses the
+    weighted equal-solid-angle quadrature in ``trace_full_na``.
+    """
+    if not 0.0 < fiber_na < MCF_IPS_N or n_theta < 2 or n_phi < 4:
+        raise ValueError("invalid full-NA cone configuration")
+    er, _, _ = _frame(surface)
+    origin = np.r_[surface["core_r"]*er, surface["base_z"]]
+    theta_max = float(np.arcsin(fiber_na/MCF_IPS_N))
+    launch = [(0.0, 0.0, np.array([0.0, 0.0, -1.0]))]
+    for theta in np.linspace(0.0, theta_max, int(n_theta))[1:]:
+        for phi in np.linspace(0.0, 2*np.pi, int(n_phi), endpoint=False):
+            launch.append((float(theta), float(phi), np.array([
+                np.sin(theta)*np.cos(phi), np.sin(theta)*np.sin(phi),
+                -np.cos(theta)])))
+
+    paths, theta_rows, phi_rows = [], [], []
+    diamond_normal = np.array([0.0, 0.0, -1.0])
+    n_dia = float(diamond_sellmeier(lam_nm/1000.0))
+    for theta, phi, direction in launch:
+        t_end = (origin[2]+10.0)/max(-direction[2], 1e-12)
+        previous_t = 0.0
+        previous_f = origin[2]-_union_boundary(
+            all_surfaces, surface["base_z"], origin[0], origin[1])[0]
+        bracket = None
+        for trial_t in np.linspace(0.0, t_end, 161)[1:]:
+            trial = origin+trial_t*direction
+            boundary_z = _union_boundary(
+                all_surfaces, surface["base_z"], trial[0], trial[1])[0]
+            f = trial[2]-boundary_z
+            if previous_f >= 0.0 and f <= 0.0:
+                bracket = [previous_t, float(trial_t)]
+                break
+            previous_t, previous_f = float(trial_t), f
+        if bracket is None:
+            continue
+        lo, hi = bracket
+        for _ in range(40):
+            mid = 0.5*(lo+hi)
+            point = origin+mid*direction
+            boundary_z = _union_boundary(
+                all_surfaces, surface["base_z"], point[0], point[1])[0]
+            if point[2]-boundary_z > 0.0:
+                lo = mid
+            else:
+                hi = mid
+        point = origin+0.5*(lo+hi)*direction
+        point[2], normal = _union_boundary(
+            all_surfaces, surface["base_z"], point[0], point[1])
+        air, _, ok1 = _fresnel_refract(
+            direction[None, :], normal[None, :], MCF_IPS_N, N_AIR)
+        air = air[0]
+        if not bool(ok1[0]) or air[2] >= 0.0:
+            continue
+        air_surface = point+(-point[2]/air[2])*air
+        diamond, _, ok2 = _fresnel_refract(
+            air[None, :], diamond_normal[None, :], N_AIR, n_dia)
+        diamond = diamond[0]
+        if not bool(ok2[0]) or diamond[2] >= 0.0:
+            continue
+        hit = air_surface+((-float(depth)-air_surface[2])/diamond[2])*diamond
+        paths.append(np.vstack([origin, point, air_surface, hit]))
+        theta_rows.append(theta)
+        phi_rows.append(phi)
+    return dict(paths=np.asarray(paths), theta=np.asarray(theta_rows),
+                phi=np.asarray(phi_rows), theta_max=theta_max,
+                fiber_na=float(fiber_na), depth=float(depth))
+
+
 def beam_stats(trace, lam_nm, depths=SEARCH_DEPTHS):
     """Weighted Gaussian-equivalent footprint, including the diffraction floor."""
-    w = trace["weight"]
+    valid = (trace["valid"] & np.isfinite(trace["weight"]) &
+             (trace["weight"] > 0.0))
+    if not np.any(valid):
+        raise ValueError("trace contains no valid transmitted rays")
+    w = trace["weight"][valid]
     total = max(w.sum(), 1e-30)
     rows = []
     n_dia = float(diamond_sellmeier(lam_nm / 1000.0))
@@ -285,11 +505,12 @@ def beam_stats(trace, lam_nm, depths=SEARCH_DEPTHS):
     tangent_x = np.array([np.cos(tilt), 0.0, np.sin(tilt)])
     tangent_y = np.array([0.0, 1.0, 0.0])
     diamond_normal = np.array([np.sin(tilt), 0.0, -np.cos(tilt)])
-    angle = np.arccos(np.clip(trace["diamond"] @ diamond_normal, -1.0, 1.0))
-    theta = max(float(np.percentile(angle[trace["valid"]], 90)) if np.any(trace["valid"]) else 0.0,
-                1e-4)
+    angle = np.arccos(np.clip(
+        trace["diamond"][valid] @ diamond_normal, -1.0, 1.0))
+    theta = max(float(np.percentile(angle, 90)), 1e-4)
     w_diff = (lam_nm*1e-3) / (np.pi*n_dia*np.sin(theta))
     for d, h in zip(np.atleast_1d(depths), trace["hits"]):
+        h = h[valid]
         xy = np.column_stack([h @ tangent_x, h @ tangent_y])
         mean = (w[:, None]*xy).sum(axis=0)/total
         q = xy - mean
@@ -344,6 +565,105 @@ def _ray_density(trace, depth_index, axis, lam_nm, rotations=(0.0,)):
         density, diffraction_sigma/dx, mode="constant")/(dx*dx)
 
 
+def _combined_overlap_plane(central_trace, side_traces, depth_index, axis):
+    """Physical 532-nm excitation x summed six-core collection density."""
+    intensity = P_GREEN_MW*_ray_density(
+        central_trace, depth_index, axis, 532.0)
+    sat = intensity/I_SAT
+    excitation_rate = R_SAT*sat/(1.0+sat)
+
+    collection = np.zeros((len(axis), len(axis)))
+    for lam, spectral_weight, traces in side_traces:
+        n_dia = float(diamond_sellmeier(lam/1000.0))
+        theta_ips = np.arcsin(MCF_FULL_NA/MCF_IPS_N)
+        solid_angle_ips = 2*np.pi*(1.0-np.cos(theta_ips))
+        effective_core_area = 0.5*np.pi*W_MODE*W_MODE
+        collection_area = (effective_core_area*MCF_IPS_N**2*solid_angle_ips /
+                           (4*np.pi*n_dia*n_dia))
+        if len(traces) == 1:
+            density = _ray_density(
+                traces[0], depth_index, axis, lam,
+                np.arange(6)*np.pi/3.0)
+        else:
+            density = sum(_ray_density(trace, depth_index, axis, lam)
+                          for trace in traces)
+        collection += spectral_weight*collection_area*density
+    return RHO*excitation_rate*np.minimum(collection, 1.0)
+
+
+def combined_overlap_volume(central, side, grid_n=101, tilt_deg=0.0,
+                            depths=DEPTHS, red_lam=RED_LAM, red_w=RED_W,
+                            ray_grid=35):
+    """Return the exact 3-D field integrated by ``evaluate_design``.
+
+    The field is the central 532-nm excitation rate multiplied by the summed,
+    spectrum-weighted reciprocal collection of all six side cores.
+    """
+    depths = np.asarray(depths, dtype=float)
+    red_lam = np.asarray(red_lam, dtype=float)
+    red_w = np.asarray(red_w, dtype=float)
+    if len(depths) < 2 or len(red_lam) != len(red_w):
+        raise ValueError("depth and spectral quadratures are inconsistent")
+
+    union = replicated_surfaces(central, side)
+    central_trace = trace_full_na(central, union, 532.0, depths, ray_grid,
+                                  tilt_deg=tilt_deg)
+    central_stats = beam_stats(central_trace, 532.0, depths)
+    side_stats, side_traces = [], []
+    # At zero tilt the sixfold union is exactly rotationally symmetric, so one
+    # side-core trace rotated six times is identical to tracing all six cores.
+    # A tilted diamond breaks that symmetry and is therefore traced explicitly.
+    side_surfaces = [side] if abs(float(tilt_deg)) < 1e-12 else union[1:]
+    for lam, spectral_weight in zip(red_lam, red_w):
+        traces = [trace_full_na(surface, union, lam, depths, ray_grid,
+                                tilt_deg=tilt_deg) for surface in side_surfaces]
+        rows = [beam_stats(trace, lam, depths) for trace in traces]
+        side_stats.append((lam, spectral_weight, rows))
+        side_traces.append((lam, spectral_weight, traces))
+
+    all_stats = central_stats + [
+        row for _, _, groups in side_stats for rows in groups for row in rows]
+    limit = max(5.0, max(np.max(np.abs(row["mean"])) + 5.0*row["fwhm"]
+                         for row in all_stats))
+    axis = np.linspace(-min(limit, 140.0), min(limit, 140.0), int(grid_n))
+    signal = np.stack([
+        _combined_overlap_plane(central_trace, side_traces, iz, axis)
+        for iz in range(len(depths))])
+
+    dx = axis[1]-axis[0]
+    dz = np.empty_like(depths)
+    dz[0] = 0.5*(depths[1]-depths[0])
+    dz[-1] = 0.5*(depths[-1]-depths[-2])
+    dz[1:-1] = 0.5*(depths[2:]-depths[:-2])
+    weighted = signal*dz[:, None, None]*dx*dx
+    total = float(weighted.sum())
+    peak = float(signal.max())
+    yy, xx = np.meshgrid(axis, axis, indexing="ij")
+    mean_x = float((weighted*xx).sum()/total)
+    mean_y = float((weighted*yy).sum()/total)
+    mean_depth = float((weighted*depths[:, None, None]).sum()/total)
+    rms = [
+        float(np.sqrt((weighted*(xx-mean_x)**2).sum()/total)),
+        float(np.sqrt((weighted*(yy-mean_y)**2).sum()/total)),
+        float(np.sqrt((weighted*(depths[:, None, None]-mean_depth)**2).sum()/total)),
+    ]
+    half_max_volume = float(
+        ((signal >= 0.5*peak)*dz[:, None, None]).sum()*dx*dx)
+    summary = {
+        "definition": ("central 532-nm excitation rate times summed six-side-core "
+                       "650-850-nm reciprocal collection"),
+        "depth_range_um": [float(depths[0]), float(depths[-1])],
+        "integrated_signal_photons_s": total,
+        "peak_signal_density_photons_s_um3": peak,
+        "centroid_xyz_um": [mean_x, mean_y, -mean_depth],
+        "rms_xyz_um": rms,
+        "half_max_volume_um3": half_max_volume,
+        "half_max_threshold_relative": 0.5,
+    }
+    return dict(axis_um=axis, depth_um=depths, signal_density=signal,
+                relative_signal=signal/max(peak, 1e-30), summary=summary)
+
+
 def surface_limits(surface):
     x, y, _ = _disk(81)
     sag, gx, gy = _sag_grad(surface, surface["aperture"]*x,
@@ -357,12 +677,12 @@ def surface_limits(surface):
 def candidate_merit(surface, role):
     """Cheap physical merit used only to shortlist surfaces."""
     if role == "central":
-        tr = trace_mode(surface, [surface], 532.0)
+        tr = trace_full_na(surface, [surface], 532.0)
         st = beam_stats(tr, 532.0)
         return np.mean([x["throughput"] / max(x["fwhm"]**2, 1e-12) for x in st])
     vals = []
     for lam, sw in zip(SEARCH_RED_LAM, SEARCH_RED_W):
-        tr = trace_mode(surface, [surface], lam)
+        tr = trace_full_na(surface, [surface], lam)
         st = beam_stats(tr, lam)
         vals.append(sw*np.mean([x["throughput"] / max(x["fwhm"]**2, 1e-12) for x in st]))
     return float(np.sum(vals))
@@ -372,7 +692,7 @@ def evaluate_design(central, side, grid_n=121, tilt_deg=0.0, depths=DEPTHS,
                     red_lam=RED_LAM, red_w=RED_W, ray_grid=35):
     """Full 3-D layer integration, including a diamond-plane tilt about y.
 
-    Fresnel transmission is already present in ``trace_mode`` at both physical
+    Fresnel transmission is already present in ``trace_full_na`` at both physical
     interfaces.  The excitation power is therefore multiplied only by the
     traced throughput here.
     """
@@ -382,15 +702,17 @@ def evaluate_design(central, side, grid_n=121, tilt_deg=0.0, depths=DEPTHS,
     if len(depths) < 2 or len(red_lam) != len(red_w):
         raise ValueError("depth and spectral quadratures are inconsistent")
     union = replicated_surfaces(central, side)
-    central_trace = trace_mode(central, union, 532.0, depths, ray_grid,
-                               tilt_deg=tilt_deg)
+    central_trace = trace_full_na(central, union, 532.0, depths, ray_grid,
+                                  tilt_deg=tilt_deg)
     cstats = beam_stats(central_trace, 532.0, depths)
     sstats = []
     side_traces = []
+    # The untilted optimization rotates this representative side-core density
+    # through all six physical cores; nonzero tilt traces each core separately.
     side_surfaces = [side] if abs(float(tilt_deg)) < 1e-12 else union[1:]
     for lam, sw in zip(red_lam, red_w):
-        traces = [trace_mode(surface, union, lam, depths, ray_grid,
-                             tilt_deg=tilt_deg) for surface in side_surfaces]
+        traces = [trace_full_na(surface, union, lam, depths, ray_grid,
+                                tilt_deg=tilt_deg) for surface in side_surfaces]
         rows = [beam_stats(trace, lam, depths) for trace in traces]
         sstats.append((lam, sw, rows))
         side_traces.append((lam, sw, traces))
@@ -407,23 +729,7 @@ def evaluate_design(central, side, grid_n=121, tilt_deg=0.0, depths=DEPTHS,
     moments = np.zeros(6)  # W, Wx, Wy, Wxx, Wyy, Wxy
 
     for iz, depth in enumerate(depths):
-        intensity = P_GREEN_MW*_ray_density(central_trace, iz, axis, 532.0)
-        sat = intensity/I_SAT
-        rate = R_SAT*sat/(1.0+sat)
-
-        eta = np.zeros_like(x)
-        for lam, sw, traces in side_traces:
-            n = float(diamond_sellmeier(lam/1000.0))
-            mode_area = (lam*1e-3)**2/(8*np.pi*n*n)
-            if len(traces) == 1:
-                density = _ray_density(
-                    traces[0], iz, axis, lam, np.arange(6)*np.pi/3.0)
-            else:
-                density = sum(_ray_density(trace, iz, axis, lam)
-                              for trace in traces)
-            eta += sw*mode_area*density
-        eta = np.minimum(eta, 1.0)
-        sig = RHO*rate*eta
+        sig = _combined_overlap_plane(central_trace, side_traces, iz, axis)
         volume = dx*dx*dz*(0.5 if iz in (0, len(depths)-1) else 1.0)
         photons += sig.sum()*volume
         ww = sig*volume
@@ -662,8 +968,8 @@ def _search_objective_cached(parameters, central_family, side_family, stage):
         cm = candidate_merit(central, "central")
         sm = candidate_merit(side, "side")
         union = replicated_surfaces(central, side)
-        ct = trace_mode(central, union, 532.0, n_grid=25)
-        st = trace_mode(side, union, 750.0, n_grid=25)
+        ct = trace_full_na(central, union, 532.0, n_grid=25)
+        st = trace_full_na(side, union, 750.0, n_grid=25)
         merit = cm*sm*ct["throughput"]*st["throughput"]
         return -merit if np.isfinite(merit) and merit > 0.0 else np.inf
     except (FloatingPointError, ValueError, np.linalg.LinAlgError):
@@ -854,8 +1160,15 @@ def write_design_json(design, path):
                                     final_depth_points=len(DEPTHS),
                                     final_spectral_points=len(RED_LAM),
                                     spectral_quadrature="normalized trapezoidal",
-                                    spatial_model="weighted traced-ray footprints with diffraction blur",
-                                    green_fresnel="included once by trace_mode",
+                                    spatial_model=(
+                                        "10-um Gaussian core area with uniformly filled full-NA "
+                                        "equal-solid-angle rays, traced footprints, and diffraction blur"),
+                                    fiber_na=MCF_FULL_NA,
+                                    ray_model="uniform_full_na",
+                                    optimization_score=(
+                                        "80-90 um volume integral of central 532-nm excitation "
+                                        "times summed six-side-core 650-850-nm reciprocal collection"),
+                                    green_fresnel="included once by trace_full_na",
                                     method_search_quadrature_points=9))
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, indent=2)

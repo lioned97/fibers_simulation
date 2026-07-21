@@ -358,9 +358,11 @@ even where the geometric one is flat — so §0's spectral average is non-trivia
 
 ## 9. Printed-lens optimization footprint
 
-`lens_design.py` evaluates the actual Snell-traced landing positions. For ray
-$i$ with traced power $w_i$ and landing position $\mathbf r_i$, the power
-density at an NV plane is
+`lens_design.py` samples thirteen Gaussian-weighted positions over the 10 um
+MFD and combines them with equal-solid-angle cells that uniformly fill the
+configured full NA cone. It evaluates the actual Snell-traced landing
+positions. For ray $i$ with traced power $w_i$ and landing position
+$\mathbf r_i$, the power density at an NV plane is
 
 $$
 D_\lambda(\mathbf r)=\sum_i w_i K_{\sigma_\lambda}
@@ -369,12 +371,14 @@ D_\lambda(\mathbf r)=\sum_i w_i K_{\sigma_\lambda}
 $$
 
 where $K$ is a normalized diffraction-blur kernel. The excitation intensity is
-$I_\mathrm{exc}=P_{532}D_{532}$. By reciprocity, the collection map for each
-side-core mode is
+$I_\mathrm{exc}=P_{532}D_{532}$. For $A_\mathrm{eff}=\pi w^2/2$ and
+$\Omega_\mathrm{NA}=2\pi[1-\cos(\arcsin(\mathrm{NA}/n_\mathrm{IPS}))]$,
+reciprocity gives the collection map for each side core as
 
 $$
 \eta_\lambda(\mathbf r)=
-\frac{\lambda^2}{8\pi n_\mathrm{dia}^2}D_\lambda(\mathbf r).
+\frac{A_\mathrm{eff}n_\mathrm{IPS}^2\Omega_\mathrm{NA}}
+{4\pi n_\mathrm{dia}^2}D_\lambda(\mathbf r).
 $$
 
 The six rotated side maps and the normalized NV spectrum are summed before the

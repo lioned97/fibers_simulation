@@ -6,7 +6,7 @@ import struct
 import numpy as np
 
 from lens_design import (MAX_PRINT, RED_LAM, beam_stats, replicated_surfaces,
-                         surface_limits, trace_mode, validate_design)
+                         surface_limits, trace_full_na, validate_design)
 from paper_figures import OUT
 
 
@@ -30,9 +30,10 @@ def main():
         lim = surface_limits(design[name])
         assert lim['print_height'] <= MAX_PRINT
         print(name, lim)
-    print("side-lens spectral throughput")
+    print("side-lens full-NA spectral throughput")
     for lam in RED_LAM:
-        tr = trace_mode(design['side'], union, lam, depths=[85.0], n_grid=31)
+        tr = trace_full_na(
+            design['side'], union, lam, depths=[85.0], n_grid=31)
         assert tr['throughput'] > 0
         print(f"  {lam:.0f} nm: T={tr['throughput']:.4f}, "
               f"FWHM@85={beam_stats(tr, lam, depths=[85.0])[0]['fwhm']:.4f} um")
