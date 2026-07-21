@@ -1,0 +1,179 @@
+{
+  "central": {
+    "family": "quadratic",
+    "role": "central",
+    "center_r": 0.0,
+    "angle": 0.0,
+    "core_r": 0.0,
+    "apex": 28.0,
+    "base_z": 113.0,
+    "aperture": 22.43355461173254,
+    "coef": [
+      6.238182893724356e-17,
+      1.4435623312983092,
+      1.4435623312983092,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "shift": -0.0,
+    "shape_parameters": {
+      "radius_scale": 1.0,
+      "radius_x_um": 15.540412855990969,
+      "radius_y_um": 15.540412855990969,
+      "vertex_tilt_deg": 3.574215516411125e-15
+    }
+  },
+  "side": {
+    "family": "asphere",
+    "role": "side",
+    "center_r": 15.0,
+    "angle": 0.0,
+    "core_r": 35.0,
+    "apex": 41.0,
+    "base_z": 113.0,
+    "aperture": 40.564451367736375,
+    "coef": [
+      -0.4601703239622774,
+      2.5087309623117506,
+      2.5087309623117506,
+      0.0,
+      0.0,
+      -0.7595752944246226,
+      -0.7595752944246226,
+      -0.7595752944246226
+    ],
+    "shift": 1.7155908598724323,
+    "shape_parameters": {
+      "tilt_scale": 1.0015828609870712,
+      "radius_scale": 0.9795674291119565,
+      "asphere_scale": 1.5839560177019316,
+      "radius_x_um": 16.16931108880522,
+      "radius_y_um": 16.16931108880522,
+      "vertex_tilt_deg": -24.71048421679574
+    }
+  },
+  "parameters": {
+    "central_lens_type": "quadratic",
+    "side_lens_type": "asphere",
+    "air_gap_um": 28.0,
+    "central_optical_clearance_um": 28.0,
+    "side_optical_clearance_um": 40.9954930373513,
+    "central_lit_radius_um": 22.43355461173254,
+    "side_lit_radius_um": 20.53195214170286,
+    "central_side_overlap_um": 47.998005979468914,
+    "side_side_overlap_um": 66.12890273547275,
+    "side_core_offset_um": -20.0,
+    "central_height_um": 85.0,
+    "side_height_um": 72.0,
+    "central_aperture_um": 22.43355461173254,
+    "side_aperture_um": 40.564451367736375,
+    "central_shape": {
+      "radius_scale": 1.0,
+      "radius_x_um": 15.540412855990969,
+      "radius_y_um": 15.540412855990969,
+      "vertex_tilt_deg": 3.574215516411125e-15
+    },
+    "side_shape": {
+      "tilt_scale": 1.0015828609870712,
+      "radius_scale": 0.9795674291119565,
+      "asphere_scale": 1.5839560177019316,
+      "radius_x_um": 16.16931108880522,
+      "radius_y_um": 16.16931108880522,
+      "vertex_tilt_deg": -24.71048421679574
+    }
+  },
+  "result": {
+    "model_fiber_photons_s": 113524744693.14595,
+    "comparison_normalized_cps": 1244897614096.6646,
+    "contrast": 0.081,
+    "fwhm_mhz": 3.5640242642140896,
+    "resolution_um": 0.8986590165599248,
+    "raw_model_sensitivity_nt": 14.16410589842412,
+    "comparison_normalized_sensitivity_nt": 4.277279347194361,
+    "tilt_deg": 0.0,
+    "max_saturation": 0.05912860243817631,
+    "clamped_signal_fraction": 0.0,
+    "central_tir_fraction": 0.00018164584902655989,
+    "side_tir_fraction": 0.07442047666160355
+  },
+  "method_comparison": {},
+  "measured": {
+    "SM": {
+      "od": 3.0,
+      "observed_kcps": 2000.0,
+      "cps": 2000000000.0,
+      "snr": 1.83,
+      "contrast": 0.0659,
+      "fwhm_mhz": 3.69,
+      "sensitivity_nt": 100.0
+    },
+    "MM": {
+      "od": 4.0,
+      "observed_kcps": 2000.0,
+      "cps": 20000000000.0,
+      "snr": 4.2,
+      "contrast": 0.0693,
+      "fwhm_mhz": 4.52,
+      "sensitivity_nt": 29.0
+    },
+    "MCF": {
+      "od": 3.0,
+      "observed_kcps": 2000.0,
+      "cps": 2000000000.0,
+      "snr": 1.98,
+      "contrast": 0.081,
+      "fwhm_mhz": 3.44,
+      "sensitivity_nt": 103.0
+    }
+  },
+  "comparison_normalization": {
+    "reference_probe": "measured original MCF",
+    "reference_measured_corrected_cps": 2000000000.0,
+    "reference_model": "paper_figures.py legacy as-built MCF ensemble checkpoint",
+    "reference_model_power_nw": 0.051756581935736595,
+    "reference_photon_energy_j": 2.8377797959270407e-19,
+    "interpretation": "empirical model-to-experiment normalization; not detector efficiency",
+    "reference_model_fiber_photons_s": 182384066.62145135,
+    "factor": 10.965870193864662
+  },
+  "assumptions": {
+    "mfd_um": 10.0,
+    "ips_index": 1.52,
+    "nv_ppm": 3.0,
+    "nv_depth_um": [
+      80.0,
+      90.0
+    ],
+    "spectrum_nm": [
+      650.0,
+      850.0
+    ],
+    "print_limits_um": [
+      300.0,
+      300.0,
+      300.0
+    ],
+    "final_depth_points": 33,
+    "final_spectral_points": 33,
+    "spectral_quadrature": "normalized trapezoidal",
+    "spatial_model": "10-um Gaussian core area with uniformly filled full-NA equal-solid-angle rays, traced footprints, and diffraction blur",
+    "fiber_na": 0.22,
+    "ray_model": "uniform_full_na",
+    "optimization_score": "80-90 um volume integral of central 532-nm excitation times summed six-side-core 650-850-nm reciprocal collection",
+    "green_fresnel": "included once by trace_full_na",
+    "aperture_rule": "cap radius = decenter + scale x beam footprint, scale in [1.0, 1.35]; the fitted and physical apertures therefore coincide",
+    "exposure_min": 0.85,
+    "exposure_rule": "each cap must be the lowest surface of the printed union over this fraction of its own lit footprint",
+    "max_surface_slope": 3.0,
+    "max_surface_slope_rule": "tan of the steepest allowed tilt; bounds both TIR loss at the rim and printability",
+    "min_polymer_um": 5.0,
+    "field_grid_quantum_um": 5.0,
+    "field_grid_rule": "integration extent snapped to this ladder so nearby candidates share one mesh",
+    "diffraction_angle": "power-weighted RMS cone angle",
+    "family_choice": "top candidates re-scored on the final grid before the winner is selected",
+    "method_search_quadrature_points": 9
+  }
+}

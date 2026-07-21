@@ -65,4 +65,11 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        # A stop is a normal way to end a run that takes hours; the checkpoint
+        # holds every finished pairing, so this is not a failure.
+        print("\nstopped by request - rerun to continue from the checkpoint",
+              flush=True)
+        raise SystemExit(130)

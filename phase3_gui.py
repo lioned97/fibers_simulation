@@ -18,6 +18,7 @@ project already depends on.
 import json
 import os
 import queue
+import signal
 import subprocess
 import sys
 import threading
@@ -70,6 +71,7 @@ class Phase3App(ttk.Frame):
         super().__init__(master, padding=10)
         self.pack(fill="both", expand=True)
         self.process = None
+        self.stopping = False
         self.log_queue = queue.Queue()
 
         notebook = ttk.Notebook(self)
@@ -187,11 +189,15 @@ class Phase3App(ttk.Frame):
             return
         self.log.delete("1.0", "end")
         self._append(f"$ {interpreter()} phase3_optimize.py\n")
+        # Its own process group, so Stop can ask the search to wind down
+        # instead of killing it out from under its worker pool.
+        flags = (subprocess.CREATE_NEW_PROCESS_GROUP
+                 if sys.platform.startswith("win") else 0)
         try:
             self.process = subprocess.Popen(
                 [interpreter(), "-u", "phase3_optimize.py"], cwd=HERE,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, bufsize=1)
+                text=True, bufsize=1, creationflags=flags)
         except OSError as exc:
             self.process = None
             messagebox.showerror("Could not start", str(exc))
@@ -206,18 +212,38 @@ class Phase3App(ttk.Frame):
             self.log_queue.put(line)
         self.log_queue.put(None)
 
+    # Interpreter teardown chatter from the worker pool.  Only ever hidden
+    # after the user asks to stop: a stop is delivered to the whole process
+    # group, so the workers unwind noisily through code that says nothing about
+    # the search.  Anything outside a requested stop is still shown in full.
+    _SHUTDOWN_NOISE = (
+        "Traceback (most recent call last)", "multiprocessing", "spawn.py",
+        "KeyboardInterrupt", "BrokenPipeError", "SpawnPoolWorker",
+        "self._target(", "exitcode = _main(", "self.run()", "put((job",
+        "self._writer.send_bytes", "_send_bytes", "WriteFile", "^^^^",
+        "During handling of the above exception", 'File "<string>"',
+    )
+
+    def _is_shutdown_noise(self, line):
+        stripped = line.strip()
+        if not stripped:
+            return True
+        return any(token in line for token in self._SHUTDOWN_NOISE)
+
     def _drain_log(self):
         try:
             while True:
                 line = self.log_queue.get_nowait()
                 if line is None:
                     self._finished()
-                else:
-                    self._append(line)
-                    # a pairing just landed: keep the browser current
-                    if line.startswith("  saved "):
-                        self.refresh_designs()
-                        self.refresh_status()
+                    continue
+                if self.stopping and self._is_shutdown_noise(line):
+                    continue
+                self._append(line)
+                # a pairing just landed: keep the browser current
+                if line.startswith("  saved "):
+                    self.refresh_designs()
+                    self.refresh_status()
         except queue.Empty:
             pass
         self.after(150, self._drain_log)
@@ -239,8 +265,35 @@ class Phase3App(ttk.Frame):
                 "Stop", "Stop the search?\n\nFinished pairings stay in the "
                         "checkpoint, so Continue will pick up from there."):
             return
-        self.process.terminate()
-        self._append("\n--- stop requested ---\n")
+        self._append("\n--- stop requested; letting the search close its "
+                     "workers ---\n")
+        try:
+            self.process.send_signal(
+                signal.CTRL_BREAK_EVENT if sys.platform.startswith("win")
+                else signal.SIGINT)
+        except (OSError, ValueError):
+            self.process.terminate()
+        self.stop_button.config(state="disabled")
+        self.after(10_000, self._force_stop)
+
+    def _force_stop(self):
+        """Last resort if the search did not wind down on its own.
+
+        Kills the whole tree: terminating only the parent would leave its pool
+        workers orphaned and still burning cores.
+        """
+        if self.process is None or self.process.poll() is not None:
+            return
+        self._append("--- still running, forcing shutdown ---\n")
+        try:
+            if sys.platform.startswith("win"):
+                subprocess.run(["taskkill", "/F", "/T",
+                                str("/PID"), str(self.process.pid)],
+                               capture_output=True, check=False)
+            else:
+                self.process.kill()
+        except OSError:
+            pass
 
     def _append(self, text):
         self.log.insert("end", text)
@@ -331,6 +384,11 @@ class Phase3App(ttk.Frame):
         text += line("signal RMS width",
                      f"{row.get('resolution_um', 0):.4g}", " um")
         text += line("photons into fiber", f"{row.get('photons_s', 0):.4g}", " /s")
+        text += line("green-red shared volume",
+                     f"{row.get('overlap_volume_um3', 0):.4g}", " um^3")
+        text += line("  its area / depth",
+                     f"{row.get('overlap_area_um2', 0):.4g} um^2 / "
+                     f"{row.get('overlap_depth_um', 0):.2f} um")
         text += line("air gap / clearance",
                      f"{parameters.get('air_gap_um', 0):.1f} / "
                      f"{parameters.get('central_optical_clearance_um', 0):.1f}", " um")

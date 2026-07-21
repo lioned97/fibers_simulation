@@ -63,12 +63,20 @@ def _raytrace_figure(central, side, label, path):
         trace = trace_full_na(surface, union, lam, depths=[85.0], n_grid=25)
         near_plane = trace["valid"] & (np.abs(trace["points"][:, 1]) < 2.5)
         rays = np.flatnonzero(near_plane)[:110]
-        for ray in rays:
+        # Shade each ray by the power it carries.  A core is launched from 13
+        # points across its mode field, and drawing them equally made one core
+        # look like several sources of equal strength when the outermost pair
+        # carries under 0.1% of the light.
+        weights = trace["weight"][rays]
+        strongest = float(weights.max()) if len(weights) else 1.0
+        for ray, weight in zip(rays, weights):
+            share = weight/strongest if strongest > 0.0 else 0.0
             ax.plot([trace["origins"][ray, 0], trace["points"][ray, 0],
                      trace["air_surface"][ray, 0], trace["hits"][0, ray, 0]],
                     [trace["origins"][ray, 2], trace["points"][ray, 2],
                      trace["air_surface"][ray, 2], trace["hits"][0, ray, 2]],
-                    color=colour, lw=0.5, alpha=0.35, zorder=2)
+                    color=colour, lw=0.4+0.9*share,
+                    alpha=0.06+0.5*share, zorder=2)
         ax.plot([], [], color=colour, lw=1.6, label=name)
 
     ax.set_xlim(-reach, reach)
@@ -136,6 +144,10 @@ def export_method(label, central, side, result, root):
         resolution_um=float(result["resolution_um"]),
         fwhm_mhz=float(result["fwhm_mhz"]),
         photons_s=float(result["model_fiber_photons_s"]),
+        # the green-and-red shared sensing volume, and its shape
+        overlap_volume_um3=float(result.get("overlap_volume_um3", float("nan"))),
+        overlap_area_um2=float(result.get("overlap_area_um2", float("nan"))),
+        overlap_depth_um=float(result.get("overlap_depth_um", float("nan"))),
         max_saturation=float(result.get("max_saturation", float("nan"))),
         clamped_signal_fraction=float(
             result.get("clamped_signal_fraction", float("nan"))),

@@ -9,6 +9,7 @@ printed polymer/fibre z>0, and g is central-lens-to-diamond clearance.
 """
 import json
 import os
+import signal
 import struct
 import sys
 import time
@@ -34,7 +35,9 @@ if not 0.0 < MCF_FULL_NA < MCF_IPS_N:
 PRINT_X_UM = PRINT_Y_UM = PRINT_Z_UM = 300.0
 MAX_PRINT = PRINT_Z_UM  # compatibility name used by the fabrication scripts
 NV_DEPTH_UM = (80.0, 90.0)
-NV_SPECTRUM_NM = (650.0, 850.0)
+# NV- collection band.  paper_figures.py characterises the built probes over
+# 640-800 nm; the printed lenses are designed for 650-800 nm.
+NV_SPECTRUM_NM = (650.0, 800.0)
 
 # A printed cap is an optical surface only where its own core illuminates it.
 # fit_surface constrains roughly one beam footprint, so an aperture far beyond
@@ -76,6 +79,20 @@ SEARCH_DEPTHS = np.linspace(*NV_DEPTH_UM, 9)
 SEARCH_RED_LAM, SEARCH_RED_W = _spectral_quadrature(9)
 DEPTHS = np.linspace(*NV_DEPTH_UM, 33)
 RED_LAM, RED_W = _spectral_quadrature(33)
+
+
+def _band_centroid():
+    """Emission-weighted centre of the collection band."""
+    wavelength = np.linspace(*NV_SPECTRUM_NM, 401)
+    weight = nv_emission_spectrum(wavelength)
+    return float((wavelength*weight).sum()/weight.sum())
+
+
+# The side lens is fitted at one wavelength, so it should be the centre of the
+# band it serves.  This was hard-coded to 750 nm, which sat off-centre and, for
+# the previous 650-850 nm band, biased the surface toward the red tail where
+# the NV barely emits.
+RED_DESIGN_NM = _band_centroid()
 
 # The legacy model checkpoint is kept explicit because it is only an empirical
 # comparison normalization.  Its factor exceeds one, so it must not be called a
@@ -275,7 +292,7 @@ def fit_surface(family, role, gap, base_height, aperture, center_r=0.0,
                    apex=float(gap + (side_offset if role == "side" else 0.0)),
                    base_z=float(gap + base_height), aperture=float(aperture),
                    coef=np.zeros(8), shift=0.0)
-    lam = 532.0 if role == "central" else 750.0
+    lam = 532.0 if role == "central" else RED_DESIGN_NM
     n_dia = float(diamond_sellmeier(lam / 1000.0))
     er, et, center = _frame(surface)
     core_xy = surface["core_r"]*er
@@ -805,7 +822,7 @@ def surface_limits(surface):
 # the expensive stage with essentially no information.  Coarsening the real
 # objective instead keeps 7.6x of the speed at rank correlation +0.68.
 PROXY_DEPTHS = np.linspace(*NV_DEPTH_UM, 3)
-PROXY_RED_LAM = np.array([750.0])      # band centre
+PROXY_RED_LAM = np.array([RED_DESIGN_NM])   # band centre, from the spectrum
 PROXY_RED_W = np.array([1.0])
 PROXY_GRID_N = 41
 PROXY_RAY_GRID = 17
@@ -849,10 +866,12 @@ def evaluate_design(central, side, grid_n=121, tilt_deg=0.0, depths=DEPTHS,
     moments = np.zeros(6)  # W, Wx, Wy, Wxx, Wyy, Wxy
     max_saturation = 0.0
     clamped_fraction = 0.0
+    planes = []
 
     for iz, depth in enumerate(depths):
         sig, plane_diag = _combined_overlap_plane(
             central_trace, side_traces, iz, axis)
+        planes.append(sig)
         max_saturation = max(max_saturation, plane_diag["max_saturation"])
         clamped_fraction = max(clamped_fraction,
                                plane_diag["clamped_signal_fraction"])
@@ -865,6 +884,24 @@ def evaluate_design(central, side, grid_n=121, tilt_deg=0.0, depths=DEPTHS,
     if (not np.isfinite(photons) or photons <= 0.0 or
             not np.isfinite(moments[0]) or moments[0] <= 0.0):
         raise ValueError("design produces no finite collected signal")
+    # The sensing volume itself: where the green excitation and the six side
+    # cores' collection actually overlap, since only an NV that is both pumped
+    # and seen contributes.  The objective already integrates this product, but
+    # the volume was never reported, so a design could not be judged on the one
+    # quantity the probe is built around.  Half-max threshold, as in
+    # combined_overlap_volume, so the two agree.
+    field = np.stack(planes)
+    peak = float(field.max())
+    if peak > 0.0:
+        core = field >= 0.5*peak
+        overlap_volume = float(core.sum())*dx*dx*dz
+        lateral = core.any(axis=0)
+        overlap_area = float(lateral.sum())*dx*dx
+        overlap_depth = (overlap_volume/overlap_area
+                         if overlap_area > 0.0 else 0.0)
+    else:
+        overlap_volume = overlap_area = overlap_depth = 0.0
+
     comparison_cps = photons*COMPARISON_NORMALIZATION["factor"]
     mx, my = moments[1]/moments[0], moments[2]/moments[0]
     vx = moments[3]/moments[0]-mx*mx
@@ -884,6 +921,9 @@ def evaluate_design(central, side, grid_n=121, tilt_deg=0.0, depths=DEPTHS,
                 tilt_deg=float(tilt_deg),
                 max_saturation=float(max_saturation),
                 clamped_signal_fraction=float(clamped_fraction),
+                overlap_volume_um3=float(overlap_volume),
+                overlap_area_um2=float(overlap_area),
+                overlap_depth_um=float(overlap_depth),
                 central_tir_fraction=float(central_trace["tir_fraction"]),
                 side_tir_fraction=float(max(
                     trace["tir_fraction"]
@@ -1190,6 +1230,19 @@ def _coordinate_refine(parameters, central_family, side_family):
     return merit, point
 
 
+def _ignore_interrupt():
+    """Pool-worker start-up: let the parent own Ctrl-C.
+
+    Ctrl-C, and the GUI's Stop, are delivered to the whole process group.  A
+    worker that handles it raises inside its own task loop and prints a
+    traceback, so a deliberate stop looked like a crash in eight processes at
+    once.  Ignoring it here leaves the parent to unwind and terminate the pool.
+    """
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    if hasattr(signal, "SIGBREAK"):                       # Windows CTRL_BREAK
+        signal.signal(signal.SIGBREAK, signal.SIG_IGN)
+
+
 def _surface_from_json(data):
     """Rebuild a surface dict written by _surface_json."""
     surface = dict(data)
@@ -1328,7 +1381,8 @@ def search_design(families=("quadratic", "asphere", "biconic", "freeform"),
     worker_map = 1
     if workers != 1:
         from multiprocessing import Pool
-        worker_pool = Pool(None if workers == -1 else workers)
+        worker_pool = Pool(None if workers == -1 else workers,
+                           initializer=_ignore_interrupt)
         worker_map = worker_pool.map
 
     def _evolve(**kwargs):
@@ -1428,9 +1482,19 @@ def search_design(families=("quadratic", "asphere", "biconic", "freeform"),
             completed.add((central_family, side_family))
             _save_checkpoint(checkpoint, signature, completed, finalists,
                              method_results)
+    except KeyboardInterrupt:
+        # Ctrl-C, or the GUI's Stop button.  Completed pairings are already on
+        # disk, so say so rather than letting the interrupt look like a loss.
+        print(f"\nsearch interrupted after {len(completed)} pairing(s); "
+              "they are saved and will be skipped when you continue",
+              flush=True)
+        raise
     finally:
         if worker_pool is not None:
-            worker_pool.close()
+            # terminate, not close: close() waits for queued work, which on an
+            # interrupt leaves the workers writing into a pipe the parent is
+            # already tearing down -- the source of the BrokenPipeError storm.
+            worker_pool.terminate()
             worker_pool.join()
 
     # Every score above comes from the coarse search grid.  Ranking on it and
