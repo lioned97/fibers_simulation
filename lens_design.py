@@ -11,6 +11,7 @@ import json
 import os
 import struct
 import sys
+import time
 from functools import lru_cache
 
 import numpy as np
@@ -1224,6 +1225,8 @@ def _save_checkpoint(path, signature, done, finalists, method_results):
         return
     payload = dict(version=1, signature=signature,
                    done=[list(pair) for pair in sorted(done)],
+                   updated_at=time.strftime("%Y-%m-%d %H:%M:%S"),
+                   last_completed=(finalists[-1][1] if finalists else None),
                    method_comparison=method_results,
                    finalists=[dict(merit=float(merit), label=label,
                                    central=_surface_json(central),
@@ -1292,7 +1295,8 @@ class _ProgressBar:
 
 def search_design(families=("quadratic", "asphere", "biconic", "freeform"),
                   proxy_maxiter=120, full_maxiter=80, popsize=8, restarts=2,
-                  workers=-1, rescore_count=3, checkpoint=None):
+                  workers=-1, rescore_count=3, checkpoint=None,
+                  method_dir=None):
     """Deterministic global integer search followed by 1-um refinement.
 
     The family contest is decided on the same resolution the winner is
@@ -1305,6 +1309,10 @@ def search_design(families=("quadratic", "asphere", "biconic", "freeform"),
     search.  Per-pair seeds come from the position in the family product, not
     from a counter of executed pairs, so a resumed run reproduces exactly the
     sequence an uninterrupted one would have produced.
+
+    ``method_dir`` is a folder in which each family pairing's own best design
+    is written as it completes -- geometry, STLs and a ray trace -- so every
+    candidate can be inspected and chosen from, not just the overall winner.
     """
     families = tuple(families)
     if (not families or min(proxy_maxiter, full_maxiter) < 0 or
@@ -1407,6 +1415,16 @@ def search_design(families=("quadratic", "asphere", "biconic", "freeform"),
             print(f"  refined sensitivity={merit:.6g} nT/sqrt(Hz), "
                   f"parameters={design_parameters(central, side)}", flush=True)
             finalists.append((merit, label, central, side))
+            if method_dir:
+                # Late import: method_export imports this module, and writing
+                # the artifacts must never be able to lose a completed pair.
+                try:
+                    from method_export import export_method
+                    folder = export_method(label, central, side, result, method_dir)
+                    print(f"  saved {folder}", flush=True)
+                except Exception as exc:
+                    print(f"  (could not export {label}: "
+                          f"{type(exc).__name__}: {exc})", flush=True)
             completed.add((central_family, side_family))
             _save_checkpoint(checkpoint, signature, completed, finalists,
                              method_results)

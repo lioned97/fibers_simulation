@@ -4,6 +4,7 @@ import os
 from lens_design import (COMPARISON_NORMALIZATION, MCF_FULL_NA, design_parameters,
                          search_design, surface_limits,
                          validate_design, write_binary_stl, write_design_json)
+from method_export import METHODS_DIRNAME
 from paper_figures import OUT
 
 
@@ -14,8 +15,10 @@ def main():
     # Written after every family pair; an interrupted run resumes here instead
     # of repeating completed work.  Delete it to force a fresh search.
     checkpoint = os.path.join(OUT, "phase3_checkpoint.json")
+    methods = os.path.join(OUT, METHODS_DIRNAME)
     print(f"checkpoint: {checkpoint}", flush=True)
-    design = search_design(checkpoint=checkpoint)
+    print(f"per-method designs: {methods}", flush=True)
+    design = search_design(checkpoint=checkpoint, method_dir=methods)
     validate_design(design)
     json_path = os.path.join(OUT, "mcf_freeform_design.json")
     stl_path = os.path.join(OUT, "mcf_freeform_central_one_side.stl")
