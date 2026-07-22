@@ -1,246 +1,110 @@
 {
   "central": {
-    "family": "asphere",
+    "family": "quadratic",
     "role": "central",
     "center_r": 0.0,
     "angle": 0.0,
     "core_r": 0.0,
-    "apex": 10.0,
-    "base_z": 92.0,
-    "aperture": 21.994723272494923,
+    "apex": 18.0,
+    "base_z": 91.0,
+    "aperture": 20.678229254782064,
     "coef": [
-      6.524933152401592e-17,
-      1.6994728016447638,
-      1.6994728016447638,
+      5.4297896637873544e-17,
+      1.561478855658562,
+      1.561478855658562,
       0.0,
       0.0,
-      -0.2498141551543344,
-      -0.2498141551543344,
-      -0.2498141551543344
+      0.0,
+      0.0,
+      0.0
     ],
     "shift": -0.0,
     "shape_parameters": {
       "radius_scale": 1.0,
-      "asphere_scale": 1.0666745057370424,
-      "radius_x_um": 12.942086069990793,
-      "radius_y_um": 12.942086069990793,
-      "vertex_tilt_deg": 3.738511312376028e-15
+      "radius_x_um": 13.24272127019031,
+      "radius_y_um": 13.24272127019031,
+      "vertex_tilt_deg": 3.1110403137877366e-15
     }
   },
   "side": {
-    "family": "freeform",
+    "family": "biconic",
     "role": "side",
-    "center_r": 34.0,
+    "center_r": 32.0,
     "angle": 0.0,
     "core_r": 35.0,
-    "apex": 26.0,
-    "base_z": 92.0,
-    "aperture": 21.96472949880108,
+    "apex": 30.0,
+    "base_z": 91.0,
+    "aperture": 22.18029897038872,
     "coef": [
-      0.7026857109702142,
-      0.9944274599518559,
-      1.3331597871133196,
-      0.06037828133314016,
-      -0.03792559351975251,
-      0.48186901289339035,
-      0.4280072246005203,
-      0.27621453078706365
+      0.5783706362671885,
+      1.0961501047940854,
+      1.403229504360117,
+      0.0,
+      0.0,
+      0.42174269065383896,
+      0.42174269065383896,
+      0.42174269065383896
     ],
-    "shift": 5.084531966451972,
+    "shift": 3.23165276134801,
     "shape_parameters": {
-      "tilt_scale": 1.00235006145696,
-      "radius_x_scale": 0.9939528613952069,
-      "radius_y_scale": 0.9995453818070832,
-      "odd_scale": 0.9672295747280484,
-      "quartic_scale": 0.7886802440567772,
-      "radius_x_um": 22.087814730965373,
-      "radius_y_um": 16.475691594599578,
-      "vertex_tilt_deg": 35.095165047738355
+      "tilt_scale": 1.0136023030052288,
+      "radius_x_scale": 1.0222681712120503,
+      "radius_y_scale": 1.0071834877876809,
+      "asphere_scale": 0.8804951630458099,
+      "radius_x_um": 20.234727774400337,
+      "radius_y_um": 15.806608185952516,
+      "vertex_tilt_deg": 30.043827672307817
     }
   },
   "parameters": {
-    "central_lens_type": "asphere",
-    "side_lens_type": "freeform",
-    "air_gap_um": 10.0,
-    "central_optical_clearance_um": 10.0,
-    "side_optical_clearance_um": 26.00016999230593,
-    "central_lit_radius_um": 21.994723272494923,
-    "side_lit_radius_um": 19.65428946322762,
-    "central_side_overlap_um": 9.959452771296,
-    "side_side_overlap_um": 9.929458997602161,
-    "side_core_offset_um": -1.0,
-    "central_height_um": 82.0,
-    "side_height_um": 66.0,
-    "central_aperture_um": 21.994723272494923,
-    "side_aperture_um": 21.96472949880108,
+    "central_lens_type": "quadratic",
+    "side_lens_type": "biconic",
+    "air_gap_um": 18.0,
+    "central_optical_clearance_um": 18.0,
+    "side_optical_clearance_um": 30.005334864231155,
+    "central_lit_radius_um": 20.678229254782064,
+    "side_lit_radius_um": 18.92290389783159,
+    "central_side_overlap_um": 10.858528225170787,
+    "side_side_overlap_um": 12.360597940777438,
+    "side_core_offset_um": -3.0,
+    "central_height_um": 73.0,
+    "side_height_um": 61.0,
+    "central_aperture_um": 20.678229254782064,
+    "side_aperture_um": 22.18029897038872,
     "central_shape": {
       "radius_scale": 1.0,
-      "asphere_scale": 1.0666745057370424,
-      "radius_x_um": 12.942086069990793,
-      "radius_y_um": 12.942086069990793,
-      "vertex_tilt_deg": 3.738511312376028e-15
+      "radius_x_um": 13.24272127019031,
+      "radius_y_um": 13.24272127019031,
+      "vertex_tilt_deg": 3.1110403137877366e-15
     },
     "side_shape": {
-      "tilt_scale": 1.00235006145696,
-      "radius_x_scale": 0.9939528613952069,
-      "radius_y_scale": 0.9995453818070832,
-      "odd_scale": 0.9672295747280484,
-      "quartic_scale": 0.7886802440567772,
-      "radius_x_um": 22.087814730965373,
-      "radius_y_um": 16.475691594599578,
-      "vertex_tilt_deg": 35.095165047738355
+      "tilt_scale": 1.0136023030052288,
+      "radius_x_scale": 1.0222681712120503,
+      "radius_y_scale": 1.0071834877876809,
+      "asphere_scale": 0.8804951630458099,
+      "radius_x_um": 20.234727774400337,
+      "radius_y_um": 15.806608185952516,
+      "vertex_tilt_deg": 30.043827672307817
     }
   },
   "result": {
-    "model_fiber_photons_s": 323392236579.53424,
-    "comparison_normalized_cps": 3546277288034.7437,
+    "model_fiber_photons_s": 129161613874.03413,
+    "comparison_normalized_cps": 1416369491772.7273,
     "contrast": 0.081,
-    "fwhm_mhz": 3.56389598001005,
-    "resolution_um": 0.723691466642785,
-    "raw_model_sensitivity_nt": 8.391778355901838,
-    "comparison_normalized_sensitivity_nt": 2.5341507967633237,
+    "fwhm_mhz": 3.5639011521547395,
+    "resolution_um": 0.731555682335136,
+    "raw_model_sensitivity_nt": 13.278612534679228,
+    "comparison_normalized_sensitivity_nt": 4.009877895667153,
     "tilt_deg": 0.0,
-    "max_saturation": 0.15687182918565626,
-    "clamped_signal_fraction": 0.0,
-    "overlap_volume_um3": 1.93359375,
-    "overlap_area_um2": 0.5625,
-    "overlap_depth_um": 3.4375,
-    "central_tir_fraction": 0.004112564668575882,
-    "side_tir_fraction": 0.1366200606011393
+    "max_saturation": 0.0691837784338729,
+    "clamped_signal_fraction": 0.9932797057080761,
+    "overlap_volume_um3": 25.3125,
+    "overlap_area_um2": 2.25,
+    "overlap_depth_um": 11.25,
+    "central_tir_fraction": 0.002456039364594802,
+    "side_tir_fraction": 0.1386124453266278
   },
-  "method_comparison": {
-    "quadratic + quadratic": {
-      "raw_model_sensitivity_nt": 17.41193819790911,
-      "comparison_normalized_sensitivity_nt": 5.258060352177068,
-      "model_fiber_photons_s": 75116977545.57928,
-      "comparison_normalized_cps": 823723025120.2689,
-      "resolution_um": 0.6899070745221814,
-      "search_grid_sensitivity_nt": 17.411943195404234
-    },
-    "quadratic + asphere": {
-      "raw_model_sensitivity_nt": 14.375885397226822,
-      "comparison_normalized_sensitivity_nt": 4.341232559835107,
-      "model_fiber_photons_s": 110206935429.53502,
-      "comparison_normalized_cps": 1208514948383.9055,
-      "resolution_um": 0.9443081083167612,
-      "search_grid_sensitivity_nt": 14.375604075977272
-    },
-    "quadratic + biconic": {
-      "raw_model_sensitivity_nt": 10.415368859342495,
-      "comparison_normalized_sensitivity_nt": 3.1452350353038137,
-      "model_fiber_photons_s": 209926309344.14966,
-      "comparison_normalized_cps": 2302024658545.0234,
-      "resolution_um": 0.573826610381216,
-      "search_grid_sensitivity_nt": 10.415311845289358
-    },
-    "quadratic + freeform": {
-      "raw_model_sensitivity_nt": 10.156316277411173,
-      "comparison_normalized_sensitivity_nt": 3.0670062881821543,
-      "model_fiber_photons_s": 220773931330.4353,
-      "comparison_normalized_cps": 2420978273158.744,
-      "resolution_um": 0.6049712315739015,
-      "search_grid_sensitivity_nt": 10.156324406694717
-    },
-    "asphere + quadratic": {
-      "raw_model_sensitivity_nt": 17.159245565543344,
-      "comparison_normalized_sensitivity_nt": 5.181752183814213,
-      "model_fiber_photons_s": 77383027435.82155,
-      "comparison_normalized_cps": 848572234069.4869,
-      "resolution_um": 1.5429711394470331,
-      "search_grid_sensitivity_nt": 17.159151187814913
-    },
-    "asphere + asphere": {
-      "raw_model_sensitivity_nt": 14.338638472837967,
-      "comparison_normalized_sensitivity_nt": 4.329984726644826,
-      "model_fiber_photons_s": 110780061702.16287,
-      "comparison_normalized_cps": 1214799776694.236,
-      "resolution_um": 0.9409484280975084,
-      "search_grid_sensitivity_nt": 14.338800428364289
-    },
-    "asphere + biconic": {
-      "raw_model_sensitivity_nt": 10.520206240385349,
-      "comparison_normalized_sensitivity_nt": 3.1768938472305472,
-      "model_fiber_photons_s": 205761994465.1365,
-      "comparison_normalized_cps": 2256359322135.3857,
-      "resolution_um": 0.5535989708665735,
-      "search_grid_sensitivity_nt": 10.520209101388051
-    },
-    "asphere + freeform": {
-      "raw_model_sensitivity_nt": 9.82309808063392,
-      "comparison_normalized_sensitivity_nt": 2.966380994824015,
-      "model_fiber_photons_s": 236001219798.3684,
-      "comparison_normalized_cps": 2587958741902.631,
-      "resolution_um": 0.5330443397061767,
-      "search_grid_sensitivity_nt": 9.823137290484604,
-      "final_grid_sensitivity_nt": 8.391778355901838
-    },
-    "biconic + quadratic": {
-      "raw_model_sensitivity_nt": 17.355007577097016,
-      "comparison_normalized_sensitivity_nt": 5.240868432661019,
-      "model_fiber_photons_s": 75624782915.30475,
-      "comparison_normalized_cps": 829291552888.4259,
-      "resolution_um": 1.1023648385500189,
-      "search_grid_sensitivity_nt": 17.355063792700555
-    },
-    "biconic + asphere": {
-      "raw_model_sensitivity_nt": 14.316999234450487,
-      "comparison_normalized_sensitivity_nt": 4.323450105391105,
-      "model_fiber_photons_s": 111112489636.27339,
-      "comparison_normalized_cps": 1218445138268.5066,
-      "resolution_um": 0.8885904386754112,
-      "search_grid_sensitivity_nt": 14.31703601796657
-    },
-    "biconic + biconic": {
-      "raw_model_sensitivity_nt": 10.591217318326319,
-      "comparison_normalized_sensitivity_nt": 3.1983377858227255,
-      "model_fiber_photons_s": 203015381144.95096,
-      "comparison_normalized_cps": 2226240316993.4917,
-      "resolution_um": 0.6085373445623746,
-      "search_grid_sensitivity_nt": 10.591077252974086
-    },
-    "biconic + freeform": {
-      "raw_model_sensitivity_nt": 10.080573272957508,
-      "comparison_normalized_sensitivity_nt": 3.0441334015370356,
-      "model_fiber_photons_s": 224103665106.32657,
-      "comparison_normalized_cps": 2457491701525.2944,
-      "resolution_um": 0.5989083799224623,
-      "search_grid_sensitivity_nt": 10.080609374997657,
-      "final_grid_sensitivity_nt": 9.033303048936137
-    },
-    "freeform + quadratic": {
-      "raw_model_sensitivity_nt": 17.484221981829588,
-      "comparison_normalized_sensitivity_nt": 5.279888622758872,
-      "model_fiber_photons_s": 74499604952.02368,
-      "comparison_normalized_cps": 816952997398.0886,
-      "resolution_um": 0.7780644274563212,
-      "search_grid_sensitivity_nt": 17.484258398492415
-    },
-    "freeform + asphere": {
-      "raw_model_sensitivity_nt": 15.053757505523214,
-      "comparison_normalized_sensitivity_nt": 4.545936505827056,
-      "model_fiber_photons_s": 100507107979.5738,
-      "comparison_normalized_cps": 1102147899664.7456,
-      "resolution_um": 0.9842262671549906,
-      "search_grid_sensitivity_nt": 15.053904560262056
-    },
-    "freeform + biconic": {
-      "raw_model_sensitivity_nt": 11.021841209925306,
-      "comparison_normalized_sensitivity_nt": 3.3283776691131868,
-      "model_fiber_photons_s": 187461778944.1401,
-      "comparison_normalized_cps": 2055681534212.392,
-      "resolution_um": 0.6110120326699878,
-      "search_grid_sensitivity_nt": 11.02195054180663
-    },
-    "freeform + freeform": {
-      "raw_model_sensitivity_nt": 10.124743393488467,
-      "comparison_normalized_sensitivity_nt": 3.0574719027926065,
-      "model_fiber_photons_s": 222156191546.5054,
-      "comparison_normalized_cps": 2436135959262.312,
-      "resolution_um": 0.6501570097372611,
-      "search_grid_sensitivity_nt": 10.124735605786164,
-      "final_grid_sensitivity_nt": 9.166369134087573
-    }
-  },
+  "method_comparison": {},
   "measured": {
     "SM": {
       "od": 3.0,

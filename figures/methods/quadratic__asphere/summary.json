@@ -34,5 +34,16 @@
   },
   "raytrace_png": "raytrace.png",
   "one_side_stl": "lens_one_side.stl",
-  "full_stl": "lens_full_seven_core.stl"
+  "full_stl": "lens_full_seven_core.stl",
+  "unclamped": {
+    "sensitivity_nt": 14.375885397226822,
+    "photons_s": 110206935429.53502,
+    "resolution_um": 0.9443081083167612,
+    "overlap_volume_um3": 29.70703125,
+    "overlap_area_um2": 2.640625,
+    "note": "produced before the per-point escape ceiling was enforced; kept for traceability, do not quote"
+  },
+  "escape_ceiling": 0.03563452017899826,
+  "recomputed": "2026-07-22 08:03:03",
+  "model_note": "per-wavelength escape ceiling enforced on the collection probability"
 }

@@ -19,7 +19,7 @@ import numpy as np
 from scipy.ndimage import gaussian_filter
 from scipy.optimize import differential_evolution
 
-from physics import diamond_sellmeier, nv_emission_spectrum
+from physics import diamond_sellmeier, nv_emission_spectrum, trapz
 from paper_figures import (
     E_PHOT_RED, I_SAT, MCF_IPS_N, MCF_MFD, P_GREEN_MW,
     PPM, RHO, R_SAT,
@@ -697,6 +697,24 @@ def _field_axis(all_stats, grid_n):
     return np.linspace(-limit, limit, int(grid_n))
 
 
+@lru_cache(maxsize=128)
+def escape_ceiling(lam_nm):
+    """Largest share of an isotropic emitter's 4-pi output that can leave the
+    diamond, at this wavelength.
+
+    The escape cone weighted by the angle-dependent Fresnel transmission.  No
+    probe of any design can collect more than this from a point, so it is the
+    bound the per-point collection probability has to respect.
+    """
+    n_dia = float(diamond_sellmeier(lam_nm/1000.0))
+    theta = np.linspace(0.0, np.arcsin(1.0/n_dia)*(1.0-1e-12), 4096)
+    cos_i = np.cos(theta)
+    cos_t = np.sqrt(np.maximum(0.0, 1.0-(n_dia*n_dia)*(1.0-cos_i*cos_i)))
+    rs = (n_dia*cos_i-cos_t)/(n_dia*cos_i+cos_t+1e-15)
+    rp = (cos_i-n_dia*cos_t)/(cos_i+n_dia*cos_t+1e-15)
+    return float(0.5*trapz((1.0-0.5*(rs*rs+rp*rp))*np.sin(theta), theta))
+
+
 def _combined_overlap_plane(central_trace, side_traces, depth_index, axis):
     """Physical 532-nm excitation x summed six-core collection density."""
     intensity = P_GREEN_MW*_ray_density(
@@ -707,6 +725,7 @@ def _combined_overlap_plane(central_trace, side_traces, depth_index, axis):
     max_saturation = float(sat.max()) if sat.size else 0.0
 
     collection = np.zeros((len(axis), len(axis)))
+    clamped = np.zeros((len(axis), len(axis)), dtype=bool)
     for lam, spectral_weight, traces in side_traces:
         n_dia = float(diamond_sellmeier(lam/1000.0))
         theta_ips = np.arcsin(MCF_FULL_NA/MCF_IPS_N)
@@ -721,12 +740,16 @@ def _combined_overlap_plane(central_trace, side_traces, depth_index, axis):
         else:
             density = sum(_ray_density(trace, depth_index, axis, lam)
                           for trace in traces)
-        collection += spectral_weight*collection_area*density
-    # Clamping a collection probability at 1 is correct, but it also flattens
-    # the objective wherever it bites, so report how much of the signal it
-    # touched instead of applying it silently.
-    clamped = collection > 1.0
-    signal = RHO*excitation_rate*np.minimum(collection, 1.0)
+        # collection_area*density conserves etendue in the integral but carries
+        # no local bound, so a tightly focused design used to report a per-point
+        # probability several times what the escape cone allows -- the old clamp
+        # sat at 1.0, roughly 28x looser than physics.  Each wavelength is
+        # therefore held to its own escape ceiling before the spectral sum.
+        ceiling = escape_ceiling(float(lam))
+        contribution = collection_area*density
+        clamped |= contribution > ceiling
+        collection += spectral_weight*np.minimum(contribution, ceiling)
+    signal = RHO*excitation_rate*collection
     total = float(signal.sum())
     clamped_share = (float(signal[clamped].sum())/total
                      if total > 0.0 and clamped.any() else 0.0)

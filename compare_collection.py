@@ -33,7 +33,7 @@ from lens_design import (I_SAT, MCF_FULL_NA, MCF_IPS_N, NV_SPECTRUM_NM,
                          P_GREEN_MW, RED_DESIGN_NM, RHO, R_SAT, SEARCH_DEPTHS,
                          SEARCH_RED_LAM, SEARCH_RED_W, W_MODE, _field_axis,
                          _ray_density, beam_stats, diamond_sellmeier,
-                         replicated_surfaces, trace_full_na)
+                         escape_ceiling, replicated_surfaces, trace_full_na)
 from method_export import METHODS_DIRNAME, list_methods
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -88,10 +88,15 @@ def collection_efficiency(central, side, coarse=False):
             core_area = 0.5*np.pi*W_MODE*W_MODE
             acceptance = (core_area*MCF_IPS_N**2*solid_angle /
                           (4*np.pi*n_dia*n_dia))
-            collection += weight*acceptance*_ray_density(
+            # held to the escape ceiling at this wavelength, exactly as
+            # lens_design does: etendue bounds the integral, not the value at
+            # a point, so a tightly focused design would otherwise report more
+            # light leaving the diamond than can leave it.
+            contribution = acceptance*_ray_density(
                 trace, iz, axis, lam, np.arange(6)*np.pi/3.0)
+            collection += weight*np.minimum(contribution, escape_ceiling(lam))
 
-        signal = excitation*np.minimum(collection, 1.0)
+        signal = excitation*collection
         planes.append(signal)
         peak = max(peak, float(signal.max()))
         volume = dx*dx*dz*(0.5 if iz in (0, len(depths)-1) else 1.0)
@@ -125,15 +130,15 @@ def as_built_best(coarse=False):
     return best
 
 
-def multimode_reference():
-    """Bare MM fiber at contact, from the characterisation model.
+def multimode_reference(name="MM"):
+    """Bare SM/MM fiber at contact, from the characterisation model.
 
     A bare fiber has no printed cap, so it cannot be written as a surface in
     the design model; this is paper_figures' tracer, and is kept visually
     separate in the figure for that reason.
     """
     import paper_figures as P
-    config = next(c for c in P.CONFIGS if c["name"] == "MM")
+    config = next(c for c in P.CONFIGS if c["name"] == name)
     rays, weights = P.escape_cone_quadrature(config["nen"], P.N_DIA_RED, seed=23)
     emitters, density = P.sample_ensemble(config, P.N_EMIT,
                                           np.random.default_rng(42))
@@ -189,20 +194,6 @@ def _surfaces_of(design):
     return surfaces
 
 
-def escape_ceiling():
-    """Hard bound: the share of an NV's 4-pi emission that can leave at all.
-
-    Light past the diamond-air critical angle is turned back, so no probe of
-    any design can collect more than the escape cone, times the normal-incidence
-    Fresnel transmission.  Worth drawing, because it is the first thing to check
-    a large collection efficiency against.
-    """
-    n_dia = float(diamond_sellmeier(RED_DESIGN_NM/1000.0))
-    solid_angle_share = 0.5*(1.0-np.cos(np.arcsin(1.0/n_dia)))
-    fresnel = 1.0-((n_dia-1.0)/(n_dia+1.0))**2
-    return solid_angle_share*fresnel
-
-
 def write_figure(report, path):
     import matplotlib
     matplotlib.use("Agg")
@@ -211,7 +202,7 @@ def write_figure(report, path):
     best = report["designs"][0]
     as_built = report["as_built"]
     multimode = report["multimode"]
-    ceiling = 100*escape_ceiling()
+    ceiling = 100*escape_ceiling(RED_DESIGN_NM)
 
     names = ["MCF\nas-built", "MCF\nnew design"]
     values = [100*as_built["collection_efficiency"],
@@ -288,7 +279,7 @@ def main(coarse=False):
     write_figure(report, os.path.join(OUT, "collection_comparison.png"))
 
     as_built = report["as_built"]
-    ceiling = escape_ceiling()
+    ceiling = escape_ceiling(RED_DESIGN_NM)
     print(f"model: {NV_SPECTRUM_NM[0]:.0f}-{NV_SPECTRUM_NM[1]:.0f} nm, "
           f"{report['model']['grid']} grid")
     print(f"physical ceiling (light that can escape the diamond at all): "
