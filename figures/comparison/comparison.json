@@ -1,0 +1,97 @@
+{
+  "model": {
+    "band_nm": [
+      650.0,
+      800.0
+    ],
+    "design_nm": 706.3521324874894,
+    "ips_index": 1.52,
+    "grid": "coarse"
+  },
+  "as_built_reference": {
+    "gap_um": 20.0,
+    "model_photons_s": 343504123.8545279,
+    "model_resolution_um": 26.55832632007959,
+    "note": "rebuilt from the fabricated STL geometry and run through the same evaluate_design as the candidates, so the ratios below are within one model"
+  },
+  "measured": {
+    "SM": {
+      "od": 3.0,
+      "observed_kcps": 2000.0,
+      "cps": 2000000000.0,
+      "snr": 1.83,
+      "contrast": 0.0659,
+      "fwhm_mhz": 3.69,
+      "sensitivity_nt": 100.0
+    },
+    "MM": {
+      "od": 4.0,
+      "observed_kcps": 2000.0,
+      "cps": 20000000000.0,
+      "snr": 4.2,
+      "contrast": 0.0693,
+      "fwhm_mhz": 4.52,
+      "sensitivity_nt": 29.0
+    },
+    "MCF": {
+      "od": 3.0,
+      "observed_kcps": 2000.0,
+      "cps": 2000000000.0,
+      "snr": 1.98,
+      "contrast": 0.081,
+      "fwhm_mhz": 3.44,
+      "sensitivity_nt": 103.0
+    }
+  },
+  "designs": [
+    {
+      "label": "quadratic + freeform",
+      "photons_s": 220773931330.4353,
+      "resolution_um": 0.6049712315739015,
+      "overlap_volume_um3": 14.0625,
+      "photon_gain_vs_as_built": 642.711152498221,
+      "projected_nt": 4.20908015788416
+    },
+    {
+      "label": "quadratic + biconic",
+      "photons_s": 209926309344.14966,
+      "resolution_um": 0.573826610381216,
+      "overlap_volume_um3": 16.875,
+      "photon_gain_vs_as_built": 611.131846070798,
+      "projected_nt": 4.316439268478313
+    },
+    {
+      "label": "asphere + asphere",
+      "photons_s": 110780061702.16287,
+      "resolution_um": 0.9409484280975084,
+      "overlap_volume_um3": 25.3125,
+      "photon_gain_vs_as_built": 322.4999468975156,
+      "projected_nt": 5.942359122994982
+    },
+    {
+      "label": "quadratic + asphere",
+      "photons_s": 110206935429.53502,
+      "resolution_um": 0.9443081083167612,
+      "overlap_volume_um3": 29.70703125,
+      "photon_gain_vs_as_built": 320.83147705151583,
+      "projected_nt": 5.9577953585458605
+    },
+    {
+      "label": "asphere + quadratic",
+      "photons_s": 77383027435.82155,
+      "resolution_um": 1.5429711394470331,
+      "overlap_volume_um3": 70.3125,
+      "photon_gain_vs_as_built": 225.27539572885254,
+      "projected_nt": 7.111302765829204
+    },
+    {
+      "label": "quadratic + quadratic",
+      "photons_s": 75116977545.57928,
+      "resolution_um": 0.6899070745221814,
+      "overlap_volume_um3": 63.45703125,
+      "photon_gain_vs_as_built": 218.6785320149196,
+      "projected_nt": 7.216026123775415
+    }
+  ],
+  "assumption": "projected sensitivities assume this model misestimates a new tip by the same factor it misestimates the as-built tip; only the ratio is modelled, the anchor is measured"
+}

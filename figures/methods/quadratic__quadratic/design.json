@@ -5,13 +5,13 @@
     "center_r": 0.0,
     "angle": 0.0,
     "core_r": 0.0,
-    "apex": 49.0,
-    "base_z": 141.0,
-    "aperture": 23.56868029912717,
+    "apex": 47.0,
+    "base_z": 139.0,
+    "aperture": 23.595432685769957,
     "coef": [
-      4.681187159337254e-17,
-      1.296182501369108,
-      1.296182501369108,
+      4.9170042798603344e-17,
+      1.3069021425522491,
+      1.3069021425522491,
       0.0,
       0.0,
       0.0,
@@ -20,82 +20,85 @@
     ],
     "shift": -0.0,
     "shape_parameters": {
-      "radius_scale": 1.0047398879832878,
-      "radius_x_um": 18.183149575181332,
-      "radius_y_um": 18.183149575181332,
-      "vertex_tilt_deg": 2.682122673408595e-15
+      "radius_scale": 1.005880350224602,
+      "radius_x_um": 18.05447547869991,
+      "radius_y_um": 18.05447547869991,
+      "vertex_tilt_deg": 2.8172359308375986e-15
     }
   },
   "side": {
     "family": "quadratic",
     "role": "side",
-    "center_r": 27.0,
+    "center_r": 28.0,
     "angle": 0.0,
     "core_r": 35.0,
-    "apex": 77.0,
-    "base_z": 141.0,
-    "aperture": 31.29203851065564,
+    "apex": 74.0,
+    "base_z": 139.0,
+    "aperture": 28.417043570735338,
     "coef": [
-      0.06746100882563454,
-      1.7903011160892375,
-      1.7903011160892375,
+      0.14244167152444479,
+      1.596858463754835,
+      1.596858463754835,
       0.0,
       0.0,
       0.0,
       0.0,
       0.0
     ],
-    "shift": 0.035521909969054105,
+    "shift": 0.17788713589575864,
     "shape_parameters": {
-      "tilt_scale": 1.2029933384308258,
-      "radius_scale": 1.0345298335076067,
-      "radius_x_um": 17.47864548004666,
-      "radius_y_um": 17.47864548004666,
-      "vertex_tilt_deg": 3.859383506751392
+      "tilt_scale": 1.097858827763783,
+      "radius_scale": 1.0418785539784774,
+      "radius_x_um": 17.79559316980155,
+      "radius_y_um": 17.79559316980155,
+      "vertex_tilt_deg": 8.106772339637136
     }
   },
   "parameters": {
     "central_lens_type": "quadratic",
     "side_lens_type": "quadratic",
-    "air_gap_um": 49.0,
-    "central_optical_clearance_um": 49.0,
-    "side_optical_clearance_um": 77.00197063051431,
+    "air_gap_um": 47.0,
+    "central_optical_clearance_um": 47.0,
+    "side_optical_clearance_um": 73.99870380922918,
     "central_lit_radius_um": 23.457494403286987,
-    "side_lit_radius_um": 19.361735237069205,
-    "central_side_overlap_um": 27.86071880978281,
-    "side_side_overlap_um": 35.58407702131128,
-    "side_core_offset_um": -8.0,
+    "side_lit_radius_um": 19.508012350148412,
+    "central_side_overlap_um": 24.012476256505295,
+    "side_side_overlap_um": 28.834087141470675,
+    "side_core_offset_um": -7.0,
     "central_height_um": 92.0,
-    "side_height_um": 64.0,
-    "central_aperture_um": 23.56868029912717,
-    "side_aperture_um": 31.29203851065564,
+    "side_height_um": 65.0,
+    "central_aperture_um": 23.595432685769957,
+    "side_aperture_um": 28.417043570735338,
     "central_shape": {
-      "radius_scale": 1.0047398879832878,
-      "radius_x_um": 18.183149575181332,
-      "radius_y_um": 18.183149575181332,
-      "vertex_tilt_deg": 2.682122673408595e-15
+      "radius_scale": 1.005880350224602,
+      "radius_x_um": 18.05447547869991,
+      "radius_y_um": 18.05447547869991,
+      "vertex_tilt_deg": 2.8172359308375986e-15
     },
     "side_shape": {
-      "tilt_scale": 1.2029933384308258,
-      "radius_scale": 1.0345298335076067,
-      "radius_x_um": 17.47864548004666,
-      "radius_y_um": 17.47864548004666,
-      "vertex_tilt_deg": 3.859383506751392
+      "tilt_scale": 1.097858827763783,
+      "radius_scale": 1.0418785539784774,
+      "radius_x_um": 17.79559316980155,
+      "radius_y_um": 17.79559316980155,
+      "vertex_tilt_deg": 8.106772339637136
     }
   },
   "result": {
-    "model_fiber_photons_s": 74825421966.59502,
-    "comparison_normalized_cps": 820525864486.8304,
+    "model_fiber_photons_s": 75116977545.57928,
+    "comparison_normalized_cps": 823723025120.2689,
     "contrast": 0.081,
-    "fwhm_mhz": 3.563851816778524,
-    "resolution_um": 0.6526946178470078,
-    "raw_model_sensitivity_nt": 17.4457172989728,
-    "comparison_normalized_sensitivity_nt": 5.268260971431305,
+    "fwhm_mhz": 3.5638743964877806,
+    "resolution_um": 0.6899070745221814,
+    "raw_model_sensitivity_nt": 17.41193819790911,
+    "comparison_normalized_sensitivity_nt": 5.258060352177068,
     "tilt_deg": 0.0,
-    "max_saturation": 0.02525141493111532,
+    "max_saturation": 0.028082896526651673,
     "clamped_signal_fraction": 0.0,
+    "overlap_volume_um3": 63.45703125,
+    "overlap_area_um2": 5.640625,
+    "overlap_depth_um": 11.25,
     "central_tir_fraction": 1.2974703501897134e-05,
-    "side_tir_fraction": 0.05010593483604655
+    "side_tir_fraction": 0.05343151413432685
   },
   "method_comparison": {},
   "measured": {
@@ -147,7 +150,7 @@
     ],
     "spectrum_nm": [
       650.0,
-      850.0
+      800.0
     ],
     "print_limits_um": [
       300.0,
