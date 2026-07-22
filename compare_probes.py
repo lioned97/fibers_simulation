@@ -38,47 +38,69 @@ FIGURES = os.path.join(HERE, "figures")
 METHODS = os.path.join(FIGURES, METHODS_DIRNAME)
 OUT = os.path.join(FIGURES, "comparison")
 
-# The fabricated tip, from the supplied STL/GWL geometry as recorded in
-# paper_figures.py.  Curvatures are the quadratic fits to the printed caps.
-AS_BUILT = dict(core_pitch=35.0, side_center_r=17.5, side_radius_radial=18.0,
-                side_radius_tangential=95.0, central_radius=74.91,
-                red_lens_height=158.815, green_lens_height=194.041,
-                aperture=17.5)
+# The fabricated tip, measured directly off the supplied STLs (Cylinder.STL,
+# Side lenses.STL, Central lens.STL) rather than taken from paper_figures'
+# constants, which sized every cap at 17.5 um.  Each printed side lens is one
+# wedge running from the central pillar at r=17.5 out to the fibre edge at
+# r=63, with its high point at the inner rim; fitting sag = u^2/(2R) along the
+# lobe axis gives R_radial = 39.8 um, and sweeping across the lobe at the core
+# radius gives R_tangential = 1139 um.  The old 17.5 um pupil stopped at the
+# core, so the outer half of each collection cone met flat polymer instead of
+# lens.  Heights are unchanged: the STL puts the side vertex at z = gap+35.23
+# and the central vertex at z = gap, exactly as the pillar heights say.
+AS_BUILT = dict(core_pitch=35.0, side_inner_r=17.5, side_outer_r=63.0,
+                side_radius_radial=39.82, side_radius_tangential=1139.27,
+                central_radius=74.91, central_aperture=17.5,
+                red_lens_height=158.815, green_lens_height=194.041)
 AS_BUILT_GAPS = np.arange(10.0, 210.0, 10.0)
 
 
 def _cap(role, gap, aperture, centre_r, core_r, apex, base_z,
-         radius_radial, radius_tangential):
+         radius_radial, radius_tangential, vertex_at_inner_rim=False):
     """One printed cap as a lens_design surface.
 
     sag = u^2/(2*Rr) + v^2/(2*Rt) in the cap's own frame, and lens_design
-    writes sag as a*(p1*x^2 + p2*y^2)/2 with x = u/a, so p1 = a/Rr, p2 = a/Rt.
+    writes sag as a*(p0*x + p1*x^2/2 + p2*y^2/2) with x = u/a, so p1 = a/Rr,
+    p2 = a/Rt.
+
+    The printed side wedge is not centred on its vertex -- it climbs from the
+    fibre edge to a high point at the inner rim -- so its sag is written about
+    x = -1.  d(sag)/dx = p0 + p1*x vanishes there when p0 = p1, and the shift
+    puts the vertex back at zero sag so ``apex`` still means the lowest point
+    of the cap, which is what the clearance checks assume.
     """
     coef = np.zeros(8)
     coef[1] = aperture/radius_radial
     coef[2] = aperture/radius_tangential
+    shift = 0.0
+    if vertex_at_inner_rim:
+        coef[0] = coef[1]
+        shift = 0.5*aperture*coef[1]
     return dict(family="as_built", role=role, center_r=float(centre_r),
                 angle=0.0, core_r=float(core_r), apex=float(apex),
                 base_z=float(base_z), aperture=float(aperture),
-                coef=coef, shift=0.0)
+                coef=coef, shift=float(shift))
 
 
 def as_built_surfaces(gap):
     """The fabricated seven-core tip, standing ``gap`` above the diamond.
 
     The side caps sit higher than the central one by the difference in printed
-    pillar height, and their pupils are decentred inward (core at 35 um, cap
-    centred at 17.5 um) -- that decentre is what steers the collection cones
-    toward the axis in the real device.
+    pillar height, and each spans r = 17.5 to 63 um with its vertex on the
+    inner rim, so the core at r = 35 looks through the middle of its own lens
+    and the surface tilt steers that cone toward the axis -- which is what the
+    printed wedge does in the real device.
     """
     base_z = gap + AS_BUILT["green_lens_height"]
     side_offset = AS_BUILT["green_lens_height"] - AS_BUILT["red_lens_height"]
-    central = _cap("central", gap, AS_BUILT["aperture"], 0.0, 0.0,
+    inner, outer = AS_BUILT["side_inner_r"], AS_BUILT["side_outer_r"]
+    central = _cap("central", gap, AS_BUILT["central_aperture"], 0.0, 0.0,
                    gap, base_z, AS_BUILT["central_radius"],
                    AS_BUILT["central_radius"])
-    side = _cap("side", gap, AS_BUILT["aperture"], AS_BUILT["side_center_r"],
+    side = _cap("side", gap, 0.5*(outer-inner), 0.5*(outer+inner),
                 AS_BUILT["core_pitch"], gap+side_offset, base_z,
-                AS_BUILT["side_radius_radial"], AS_BUILT["side_radius_tangential"])
+                AS_BUILT["side_radius_radial"], AS_BUILT["side_radius_tangential"],
+                vertex_at_inner_rim=True)
     return central, side
 
 
@@ -89,7 +111,10 @@ def evaluate(central, side, coarse=False):
                                depths=np.linspace(*(80.0, 90.0), 3),
                                red_lam=np.array([RED_DESIGN_NM]),
                                red_w=np.array([1.0]), ray_grid=17)
-    return evaluate_design(central, side, grid_n=81, depths=SEARCH_DEPTHS,
+    # 241, not the search's 81: see compare_collection._quadrature -- a sub-2-um
+    # sensing spot is not resolved on a ~1 um mesh, and the error lands on the
+    # ratio because only the new design's spot is that small.
+    return evaluate_design(central, side, grid_n=241, depths=SEARCH_DEPTHS,
                            red_lam=SEARCH_RED_LAM, red_w=SEARCH_RED_W,
                            ray_grid=31)
 

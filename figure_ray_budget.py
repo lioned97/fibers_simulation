@@ -25,7 +25,7 @@ from compare_probes import as_built_surfaces
 from lens_design import (RED_DESIGN_NM, _union_boundary_arrays,
                          diamond_sellmeier, escape_ceiling,
                          replicated_surfaces, trace_full_na)
-from method_export import METHODS_DIRNAME, list_methods
+from method_export import METHODS_DIRNAME, headline_label, list_methods
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 METHODS = os.path.join(HERE, "figures", METHODS_DIRNAME)
@@ -104,7 +104,10 @@ def probes(coarse):
     if not designs:
         raise SystemExit(f"no exported designs in {METHODS}")
     report = _report(coarse)
-    best = report["designs"][0]
+    # the design the project chose, not whichever pairing tops the eta
+    # sort -- the top four are tied and the order moves with the grid
+    label = headline_label(os.path.join(HERE, "figures"))
+    best = next(r for r in report["designs"] if r["label"] == label)
     design = next(d for d in designs if d["label"] == best["label"])
     central, side = _surfaces_of(design)
     old_central, old_side = as_built_surfaces(report["as_built"]["gap_um"])

@@ -165,6 +165,23 @@ def export_method(label, central, side, result, root):
     return directory
 
 
+def headline_label(figures_dir):
+    """Label of the design the project actually chose.
+
+    The one whose geometry sits in the top-level design JSON and in the printed
+    STLs.  Every other ordering is a re-sort: eta and sensitivity disagree about
+    which pairing wins, and both reshuffle with the field grid -- the top four
+    are within 4.5% on eta and 1.8% on sensitivity, which is the tie already on
+    record.  So a figure that picks "the best" by sorting shows a different tip
+    depending on when it was run.  Everything points here instead.
+    """
+    with open(os.path.join(figures_dir, "mcf_freeform_design.json"),
+              encoding="utf-8") as fh:
+        parameters = json.load(fh)["parameters"]
+    return (f"{parameters['central_lens_type']} + "
+            f"{parameters['side_lens_type']}")
+
+
 def list_methods(root):
     """Every exported method under ``root``, best sensitivity first."""
     if not root or not os.path.isdir(root):

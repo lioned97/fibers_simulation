@@ -1,4 +1,5 @@
 {
+  "headline": "quadratic + biconic",
   "definition": "excitation-weighted collection efficiency: integral of R_exc times collection over the 80-90 um layer, divided by integral of R_exc",
   "model": {
     "band_nm": [
@@ -10,11 +11,11 @@
   },
   "as_built": {
     "gap_um": 10.0,
-    "collection_efficiency": 4.3034246296489214e-05,
-    "photons_s": 299712335.42911875,
-    "sensing_volume_um3": 1623.125,
-    "sensing_area_um2": 220.5,
-    "sensing_diameter_um": 16.755575776860173
+    "collection_efficiency": 9.629057082102489e-05,
+    "photons_s": 670563734.2565343,
+    "sensing_volume_um3": 136.1111111111089,
+    "sensing_area_um2": 21.777777777777423,
+    "sensing_diameter_um": 5.265769446445683
   },
   "multimode": {
     "collection_efficiency": 0.0009615818307735605
@@ -22,148 +23,148 @@
   "multimode_note": "bare MM fiber at contact, computed by the characterisation model in paper_figures.py (a different tracer), shown for scale only",
   "designs": [
     {
-      "collection_efficiency": 0.01962198483483404,
-      "photons_s": 129041354198.57092,
-      "sensing_volume_um3": 25.3125,
-      "sensing_area_um2": 2.25,
-      "sensing_diameter_um": 1.692568750643269,
-      "label": "asphere + biconic",
-      "gain_vs_as_built": 455.96208888256575
-    },
-    {
-      "collection_efficiency": 0.019568270194690218,
-      "photons_s": 129161613874.0341,
-      "sensing_volume_um3": 25.3125,
-      "sensing_area_um2": 2.25,
-      "sensing_diameter_um": 1.692568750643269,
-      "label": "quadratic + biconic",
-      "gain_vs_as_built": 454.7139052900439
-    },
-    {
-      "collection_efficiency": 0.019276601032741158,
-      "photons_s": 125543102463.26541,
-      "sensing_volume_um3": 18.90625,
-      "sensing_area_um2": 1.890625,
-      "sensing_diameter_um": 1.5515213547563298,
+      "collection_efficiency": 0.019612488258693033,
+      "photons_s": 127765857857.33278,
+      "sensing_volume_um3": 8.402777777777864,
+      "sensing_area_um2": 1.050347222222233,
+      "sensing_diameter_um": 1.156435739259246,
       "label": "freeform + biconic",
-      "gain_vs_as_built": 447.93629938195915
+      "gain_vs_as_built": 203.68025749007896
     },
     {
-      "collection_efficiency": 0.019186892065713963,
-      "photons_s": 125382059335.89108,
-      "sensing_volume_um3": 18.90625,
-      "sensing_area_um2": 1.890625,
-      "sensing_diameter_um": 1.5515213547563298,
-      "label": "biconic + freeform",
-      "gain_vs_as_built": 445.85170455928846
-    },
-    {
-      "collection_efficiency": 0.019114659499624993,
-      "photons_s": 124709095746.66277,
-      "sensing_volume_um3": 18.90625,
-      "sensing_area_um2": 1.890625,
-      "sensing_diameter_um": 1.5515213547563298,
+      "collection_efficiency": 0.019287733877674493,
+      "photons_s": 125797978260.05948,
+      "sensing_volume_um3": 8.665364583333423,
+      "sensing_area_um2": 1.050347222222233,
+      "sensing_diameter_um": 1.156435739259246,
       "label": "biconic + biconic",
-      "gain_vs_as_built": 444.1732142334369
+      "gain_vs_as_built": 200.3076076215663
     },
     {
-      "collection_efficiency": 0.019109016620225586,
-      "photons_s": 125254628411.99445,
-      "sensing_volume_um3": 18.90625,
-      "sensing_area_um2": 1.890625,
-      "sensing_diameter_um": 1.5515213547563298,
-      "label": "freeform + freeform",
-      "gain_vs_as_built": 444.0420889115124
+      "collection_efficiency": 0.018743892493908374,
+      "photons_s": 123849199177.08014,
+      "sensing_volume_um3": 10.9375,
+      "sensing_area_um2": 1.25,
+      "sensing_diameter_um": 1.2615662610100802,
+      "label": "quadratic + biconic",
+      "gain_vs_as_built": 194.65968821337256
     },
     {
-      "collection_efficiency": 0.01908970542266095,
-      "photons_s": 124598178164.23021,
-      "sensing_volume_um3": 21.26953125,
-      "sensing_area_um2": 1.890625,
-      "sensing_diameter_um": 1.5515213547563298,
+      "collection_efficiency": 0.018722861675452042,
+      "photons_s": 123098790690.69955,
+      "sensing_volume_um3": 9.375,
+      "sensing_area_um2": 1.25,
+      "sensing_diameter_um": 1.2615662610100802,
+      "label": "asphere + biconic",
+      "gain_vs_as_built": 194.44127826651055
+    },
+    {
+      "collection_efficiency": 0.018144947078173313,
+      "photons_s": 118256527395.50728,
+      "sensing_volume_um3": 6.827256944444516,
+      "sensing_area_um2": 1.050347222222233,
+      "sensing_diameter_um": 1.156435739259246,
       "label": "asphere + freeform",
-      "gain_vs_as_built": 443.59334868189177
+      "gain_vs_as_built": 188.43950060177016
     },
     {
-      "collection_efficiency": 0.018650013502280842,
-      "photons_s": 123708502547.18735,
-      "sensing_volume_um3": 25.3125,
-      "sensing_area_um2": 2.25,
-      "sensing_diameter_um": 1.692568750643269,
-      "label": "quadratic + freeform",
-      "gain_vs_as_built": 433.37609246806613
-    },
-    {
-      "collection_efficiency": 0.016731335021256698,
-      "photons_s": 110780061702.16286,
-      "sensing_volume_um3": 25.3125,
-      "sensing_area_um2": 2.25,
-      "sensing_diameter_um": 1.692568750643269,
+      "collection_efficiency": 0.01772953607466459,
+      "photons_s": 117399248865.72272,
+      "sensing_volume_um3": 9.6875,
+      "sensing_area_um2": 1.25,
+      "sensing_diameter_um": 1.2615662610100802,
       "label": "asphere + asphere",
-      "gain_vs_as_built": 388.7911712449733
+      "gain_vs_as_built": 184.1253605985829
     },
     {
-      "collection_efficiency": 0.016653332579541033,
-      "photons_s": 111112489636.27339,
-      "sensing_volume_um3": 29.70703125,
-      "sensing_area_um2": 2.640625,
-      "sensing_diameter_um": 1.833616146530208,
+      "collection_efficiency": 0.017493054931284155,
+      "photons_s": 116727248269.13425,
+      "sensing_volume_um3": 12.102864583333545,
+      "sensing_area_um2": 1.4670138888889146,
+      "sensing_diameter_um": 1.366696782760932,
       "label": "biconic + asphere",
-      "gain_vs_as_built": 386.9786045468544
+      "gain_vs_as_built": 181.66944885806592
     },
     {
-      "collection_efficiency": 0.016490514378525053,
-      "photons_s": 110206935429.53499,
-      "sensing_volume_um3": 29.70703125,
-      "sensing_area_um2": 2.640625,
-      "sensing_diameter_um": 1.833616146530208,
-      "label": "quadratic + asphere",
-      "gain_vs_as_built": 383.19514799705854
-    },
-    {
-      "collection_efficiency": 0.015057011147748888,
-      "photons_s": 100507107979.57384,
-      "sensing_volume_um3": 34.453125,
-      "sensing_area_um2": 3.0625,
-      "sensing_diameter_um": 1.974663542417147,
+      "collection_efficiency": 0.01745101078464869,
+      "photons_s": 115749187531.69168,
+      "sensing_volume_um3": 3.828124999999938,
+      "sensing_area_um2": 0.34027777777777224,
+      "sensing_diameter_um": 0.6582211808057103,
       "label": "freeform + asphere",
-      "gain_vs_as_built": 349.8843930950234
+      "gain_vs_as_built": 181.23281060494335
     },
     {
-      "collection_efficiency": 0.011318086529985841,
-      "photons_s": 77383027435.82155,
-      "sensing_volume_um3": 70.3125,
-      "sensing_area_um2": 6.25,
-      "sensing_diameter_um": 2.8209479177387813,
-      "label": "asphere + quadratic",
-      "gain_vs_as_built": 263.00185326840926
+      "collection_efficiency": 0.017448039271988923,
+      "photons_s": 115706269852.99107,
+      "sensing_volume_um3": 11.5625,
+      "sensing_area_um2": 1.25,
+      "sensing_diameter_um": 1.2615662610100802,
+      "label": "quadratic + freeform",
+      "gain_vs_as_built": 181.20195075403137
     },
     {
-      "collection_efficiency": 0.01109528943996371,
-      "photons_s": 75624782915.30473,
-      "sensing_volume_um3": 63.45703125,
-      "sensing_area_um2": 5.640625,
-      "sensing_diameter_um": 2.6799005218518426,
-      "label": "biconic + quadratic",
-      "gain_vs_as_built": 257.82464885109135
+      "collection_efficiency": 0.017398961546272268,
+      "photons_s": 116497888297.31076,
+      "sensing_volume_um3": 12.836371527778002,
+      "sensing_area_um2": 1.4670138888889146,
+      "sensing_diameter_um": 1.366696782760932,
+      "label": "quadratic + asphere",
+      "gain_vs_as_built": 180.69226714432597
     },
     {
-      "collection_efficiency": 0.011031080709342328,
-      "photons_s": 75116977545.5793,
-      "sensing_volume_um3": 63.45703125,
-      "sensing_area_um2": 5.640625,
-      "sensing_diameter_um": 2.6799005218518426,
-      "label": "quadratic + quadratic",
-      "gain_vs_as_built": 256.3326108546778
+      "collection_efficiency": 0.017189981635016883,
+      "photons_s": 113342723603.1606,
+      "sensing_volume_um3": 8.665364583333423,
+      "sensing_area_um2": 1.050347222222233,
+      "sensing_diameter_um": 1.156435739259246,
+      "label": "freeform + freeform",
+      "gain_vs_as_built": 178.52196210330783
     },
     {
-      "collection_efficiency": 0.01091980238259,
-      "photons_s": 74499604952.02367,
-      "sensing_volume_um3": 70.3125,
-      "sensing_area_um2": 6.25,
-      "sensing_diameter_um": 2.8209479177387813,
+      "collection_efficiency": 0.016976533781154175,
+      "photons_s": 111444793337.01216,
+      "sensing_volume_um3": 8.140190972222307,
+      "sensing_area_um2": 1.050347222222233,
+      "sensing_diameter_um": 1.156435739259246,
+      "label": "biconic + freeform",
+      "gain_vs_as_built": 176.3052564379167
+    },
+    {
+      "collection_efficiency": 0.014520827003312477,
+      "photons_s": 98544765124.25746,
+      "sensing_volume_um3": 7.812499999999911,
+      "sensing_area_um2": 0.6944444444444365,
+      "sensing_diameter_um": 0.9403159725795884,
       "label": "freeform + quadratic",
-      "gain_vs_as_built": 253.7468021946245
+      "gain_vs_as_built": 150.80216971921698
+    },
+    {
+      "collection_efficiency": 0.014238454469846283,
+      "photons_s": 97306848962.46036,
+      "sensing_volume_um3": 7.812499999999911,
+      "sensing_area_um2": 0.6944444444444365,
+      "sensing_diameter_um": 0.9403159725795884,
+      "label": "asphere + quadratic",
+      "gain_vs_as_built": 147.869665206485
+    },
+    {
+      "collection_efficiency": 0.013971001685178838,
+      "photons_s": 94650330070.2291,
+      "sensing_volume_um3": 7.050781250000084,
+      "sensing_area_um2": 0.6267361111111186,
+      "sensing_diameter_um": 0.8933001739506194,
+      "label": "quadratic + quadratic",
+      "gain_vs_as_built": 145.09210575920994
+    },
+    {
+      "collection_efficiency": 0.013557419861667277,
+      "photons_s": 92210218575.54869,
+      "sensing_volume_um3": 7.050781250000084,
+      "sensing_area_um2": 0.6267361111111186,
+      "sensing_diameter_um": 0.8933001739506194,
+      "label": "biconic + quadratic",
+      "gain_vs_as_built": 140.79696221623226
     }
   ]
 }

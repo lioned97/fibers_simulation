@@ -34,7 +34,7 @@ from lens_design import (I_SAT, MCF_FULL_NA, MCF_IPS_N, NV_SPECTRUM_NM,
                          SEARCH_RED_LAM, SEARCH_RED_W, W_MODE, _field_axis,
                          _ray_density, beam_stats, diamond_sellmeier,
                          escape_ceiling, replicated_surfaces, trace_full_na)
-from method_export import METHODS_DIRNAME, list_methods
+from method_export import METHODS_DIRNAME, headline_label, list_methods
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FIGURES = os.path.join(HERE, "figures")
@@ -43,10 +43,20 @@ OUT = os.path.join(FIGURES, "comparison_collection")
 
 
 def _quadrature(coarse):
+    """Depths, spectrum, transverse grid and ray grid for one evaluation.
+
+    The transverse grid is 241 and not the search's 81.  The signal is the
+    product of two sharply peaked densities, and the new design's sensing spot
+    is under 2 um across against a diffraction blur of sigma ~0.5 um, so at 81
+    points (dx ~1 um) the product integral is not resolved: it reads 1.962%
+    against 1.88% converged, and the gain over the as-built tip reads 212x
+    against 194x.  The as-built tip is broad enough that 81 was already fine,
+    which is exactly why the error showed up as a gain and not as a level.
+    """
     if coarse:
         return (np.linspace(*(80.0, 90.0), 5), np.array([RED_DESIGN_NM]),
                 np.array([1.0]), 61, 21)
-    return SEARCH_DEPTHS, SEARCH_RED_LAM, SEARCH_RED_W, 81, 31
+    return SEARCH_DEPTHS, SEARCH_RED_LAM, SEARCH_RED_W, 241, 31
 
 
 def collection_efficiency(central, side, coarse=False):
@@ -169,6 +179,7 @@ def build(coarse=False, with_multimode=True):
 
     multimode = multimode_reference() if with_multimode else None
     return dict(
+        headline=headline_label(FIGURES),
         definition="excitation-weighted collection efficiency: integral of "
                    "R_exc times collection over the 80-90 um layer, divided by "
                    "integral of R_exc",
@@ -194,12 +205,19 @@ def _surfaces_of(design):
     return surfaces
 
 
+def headline_row(report):
+    """The chosen design's row, not whichever pairing tops the eta sort."""
+    label = report.get("headline") or headline_label(FIGURES)
+    return next((row for row in report["designs"] if row["label"] == label),
+                report["designs"][0])
+
+
 def write_figure(report, path):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    best = report["designs"][0]
+    best = headline_row(report)
     as_built = report["as_built"]
     multimode = report["multimode"]
     ceiling = 100*escape_ceiling(RED_DESIGN_NM)
@@ -301,10 +319,13 @@ def main(coarse=False):
               f"{row['gain_vs_as_built']:>12.1f}"
               f"{row['sensing_volume_um3']:>12.1f}"
               f"{row['sensing_diameter_um']:>10.2f}")
-    best = report["designs"][0]
-    print(f"\nbest design sits at {100*best['collection_efficiency']/(100*ceiling):.0%} "
+    best = headline_row(report)
+    print(f"\nchosen design ({best['label']}) sits at "
+          f"{100*best['collection_efficiency']/(100*ceiling):.0%} "
           "of the escape-cone ceiling - a large number, so check it before "
           "quoting it")
+    print(f"the table is sorted by eta, which is not the order that picked the "
+          f"design; the top four are within 5% of each other")
     print(f"\n{report['definition']}")
     print(f"written to {OUT}")
 

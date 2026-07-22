@@ -753,8 +753,12 @@ def _combined_overlap_plane(central_trace, side_traces, depth_index, axis):
     total = float(signal.sum())
     clamped_share = (float(signal[clamped].sum())/total
                      if total > 0.0 and clamped.any() else 0.0)
+    # the excitation integral travels with the product so a caller can form
+    # "of the NVs the green actually reaches, what fraction is seen" without
+    # tracing the green a second time
     return signal, dict(max_saturation=max_saturation,
-                        clamped_signal_fraction=clamped_share)
+                        clamped_signal_fraction=clamped_share,
+                        excitation=float(excitation_rate.sum()))
 
 
 def combined_overlap_volume(central, side, grid_n=101, tilt_deg=0.0,
@@ -886,6 +890,8 @@ def evaluate_design(central, side, grid_n=121, tilt_deg=0.0, depths=DEPTHS,
     dx = axis[1]-axis[0]
     dz = float(depths[-1]-depths[0])/(len(depths)-1)
     photons = 0.0
+    excited = 0.0
+    signal_squared = 0.0
     moments = np.zeros(6)  # W, Wx, Wy, Wxx, Wyy, Wxy
     max_saturation = 0.0
     clamped_fraction = 0.0
@@ -900,6 +906,8 @@ def evaluate_design(central, side, grid_n=121, tilt_deg=0.0, depths=DEPTHS,
                                plane_diag["clamped_signal_fraction"])
         volume = dx*dx*dz*(0.5 if iz in (0, len(depths)-1) else 1.0)
         photons += sig.sum()*volume
+        excited += plane_diag["excitation"]*volume
+        signal_squared += float((sig*sig).sum())*volume
         ww = sig*volume
         moments += [ww.sum(), (ww*x).sum(), (ww*y).sum(),
                     (ww*x*x).sum(), (ww*y*y).sum(), (ww*x*y).sum()]
@@ -935,7 +943,17 @@ def evaluate_design(central, side, grid_n=121, tilt_deg=0.0, depths=DEPTHS,
     raw_sensitivity = calibrated_sensitivity(max(photons, 1e-30), contrast, fwhm)
     normalized_sensitivity = calibrated_sensitivity(
         max(comparison_cps, 1e-30), contrast, fwhm)
+    excited_rate = RHO*excited
+    # Participation ratio of the green-times-red field: the volume a uniform
+    # source of the same total and the same peak-to-mean would occupy.  Unlike
+    # the half-maximum core it has no threshold, so it stays smooth as a design
+    # is walked off its standoff -- which is what an alignment sweep needs.
+    effective_volume = photons*photons/max(signal_squared, 1e-300)
     return dict(model_fiber_photons_s=float(photons),
+                model_excited_rate_s=float(excited_rate),
+                effective_volume_um3=float(effective_volume),
+                # of the light the green makes, the share that reaches a core
+                collection_efficiency=float(photons/max(excited_rate, 1e-30)),
                 comparison_normalized_cps=float(comparison_cps),
                 contrast=float(contrast), fwhm_mhz=float(fwhm),
                 resolution_um=float(resolution),
@@ -978,6 +996,9 @@ def alignment_sweep(design, gaps_um, angles_deg, grid_n=81):
                                  red_w=SEARCH_RED_W, ray_grid=31)
         gap_rows.append(dict(
             gap_um=float(gap), model_fiber_photons_s=result["model_fiber_photons_s"],
+            collection_efficiency=result["collection_efficiency"],
+            overlap_volume_um3=result["overlap_volume_um3"],
+            effective_volume_um3=result["effective_volume_um3"],
             comparison_normalized_cps=result["comparison_normalized_cps"],
             raw_model_sensitivity_nt=result["raw_model_sensitivity_nt"],
             comparison_normalized_sensitivity_nt=(
@@ -992,6 +1013,9 @@ def alignment_sweep(design, gaps_um, angles_deg, grid_n=81):
                                  ray_grid=31)
         angle_rows.append(dict(angle_deg=float(angle),
                                model_fiber_photons_s=result["model_fiber_photons_s"],
+                               collection_efficiency=result["collection_efficiency"],
+                               overlap_volume_um3=result["overlap_volume_um3"],
+                               effective_volume_um3=result["effective_volume_um3"],
                                comparison_normalized_cps=result["comparison_normalized_cps"],
                                raw_model_sensitivity_nt=result["raw_model_sensitivity_nt"],
                                comparison_normalized_sensitivity_nt=(

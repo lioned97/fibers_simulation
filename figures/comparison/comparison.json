@@ -10,8 +10,8 @@
   },
   "as_built_reference": {
     "gap_um": 10.0,
-    "model_photons_s": 299712335.42911875,
-    "model_resolution_um": 23.47429818882021,
+    "model_photons_s": 670563734.2565341,
+    "model_resolution_um": 32.11230346928503,
     "note": "rebuilt from the fabricated STL geometry and run through the same evaluate_design as the candidates, so the ratios below are within one model"
   },
   "measured": {
@@ -49,128 +49,128 @@
       "photons_s": 129161613874.03413,
       "resolution_um": 0.731555682335136,
       "overlap_volume_um3": 25.3125,
-      "photon_gain_vs_as_built": 430.9519449344805,
-      "projected_nt": 5.140318267898439
+      "photon_gain_vs_as_built": 192.61646175547787,
+      "projected_nt": 7.688785260536647
     },
     {
       "label": "asphere + biconic",
       "photons_s": 129041354198.57094,
       "resolution_um": 0.6990583032820059,
       "overlap_volume_um3": 25.3125,
-      "photon_gain_vs_as_built": 430.5506945979169,
-      "projected_nt": 5.142682642502963
+      "photon_gain_vs_as_built": 192.4371205991946,
+      "projected_nt": 7.692321844783419
     },
     {
       "label": "freeform + biconic",
       "photons_s": 125543102463.26544,
       "resolution_um": 0.7466373329015942,
       "overlap_volume_um3": 18.90625,
-      "photon_gain_vs_as_built": 418.87866338072723,
-      "projected_nt": 5.21388610984469
+      "photon_gain_vs_as_built": 187.2202388076613,
+      "projected_nt": 7.798826567188478
     },
     {
       "label": "biconic + freeform",
       "photons_s": 125382059335.89107,
       "resolution_um": 0.8006950987518873,
       "overlap_volume_um3": 18.90625,
-      "photon_gain_vs_as_built": 418.34133772429806,
-      "projected_nt": 5.217288781923537
+      "photon_gain_vs_as_built": 186.98007800094405,
+      "projected_nt": 7.803916216031754
     },
     {
       "label": "freeform + freeform",
       "photons_s": 125254628411.99446,
       "resolution_um": 0.8658657650501392,
       "overlap_volume_um3": 18.90625,
-      "photon_gain_vs_as_built": 417.91616028302207,
-      "projected_nt": 5.2200139681485345
+      "photon_gain_vs_as_built": 186.79004248696285,
+      "projected_nt": 7.807992495084324
     },
     {
       "label": "biconic + biconic",
       "photons_s": 124709095746.6628,
       "resolution_um": 0.7764305969022752,
       "overlap_volume_um3": 18.90625,
-      "photon_gain_vs_as_built": 416.095972720336,
-      "projected_nt": 5.231321398201547
+      "photon_gain_vs_as_built": 185.9764991390863,
+      "projected_nt": 7.824905922812934
     },
     {
       "label": "asphere + freeform",
       "photons_s": 124598178164.2302,
       "resolution_um": 0.7336089376093703,
       "overlap_volume_um3": 21.26953125,
-      "photon_gain_vs_as_built": 415.7258925824138,
-      "projected_nt": 5.233606432927777
+      "photon_gain_vs_as_built": 185.81108968318188,
+      "projected_nt": 7.828323832056524
     },
     {
       "label": "quadratic + freeform",
       "photons_s": 123708502547.18735,
       "resolution_um": 0.8081813860844161,
       "overlap_volume_um3": 25.3125,
-      "photon_gain_vs_as_built": 412.7574608167708,
-      "projected_nt": 5.25246858600791
+      "photon_gain_vs_as_built": 184.48433195443405,
+      "projected_nt": 7.856537463397258
     },
     {
       "label": "biconic + asphere",
       "photons_s": 111112489636.27339,
       "resolution_um": 0.8885904386754112,
       "overlap_volume_um3": 29.70703125,
-      "photon_gain_vs_as_built": 370.73045217570376,
-      "projected_nt": 5.542290846587431
+      "photon_gain_vs_as_built": 165.7001176174041,
+      "projected_nt": 8.290047804427225
     },
     {
       "label": "asphere + asphere",
       "photons_s": 110780061702.16287,
       "resolution_um": 0.9409484280975084,
       "overlap_volume_um3": 25.3125,
-      "photon_gain_vs_as_built": 369.62129551174945,
-      "projected_nt": 5.550667668495297
+      "photon_gain_vs_as_built": 165.2043736379312,
+      "projected_nt": 8.302577687103474
     },
     {
       "label": "quadratic + asphere",
       "photons_s": 110206935429.53502,
       "resolution_um": 0.9443081083167612,
       "overlap_volume_um3": 29.70703125,
-      "photon_gain_vs_as_built": 367.70904097672246,
-      "projected_nt": 5.565086422364274
+      "photon_gain_vs_as_built": 164.34968042481958,
+      "projected_nt": 8.324144970770604
     },
     {
       "label": "freeform + asphere",
       "photons_s": 100507107979.5738,
       "resolution_um": 0.9842262671549905,
       "overlap_volume_um3": 34.453125,
-      "photon_gain_vs_as_built": 335.34524975647355,
-      "projected_nt": 5.827499258982145
+      "photon_gain_vs_as_built": 149.88449694645033,
+      "projected_nt": 8.716656843617725
     },
     {
       "label": "asphere + quadratic",
       "photons_s": 77383027435.82155,
       "resolution_um": 1.5429711394470331,
       "overlap_volume_um3": 70.3125,
-      "photon_gain_vs_as_built": 258.1909994629582,
-      "projected_nt": 6.642560223333491
+      "photon_gain_vs_as_built": 115.39995899363315,
+      "projected_nt": 9.935808733157348
     },
     {
       "label": "biconic + quadratic",
       "photons_s": 75624782915.30475,
       "resolution_um": 1.1023648385500189,
       "overlap_volume_um3": 63.45703125,
-      "photon_gain_vs_as_built": 252.3245591711384,
-      "projected_nt": 6.7183421652737225
+      "photon_gain_vs_as_built": 112.77791960991044,
+      "projected_nt": 10.049161846298942
     },
     {
       "label": "quadratic + quadratic",
       "photons_s": 75116977545.57928,
       "resolution_um": 0.6899070745221814,
       "overlap_volume_um3": 63.45703125,
-      "photon_gain_vs_as_built": 250.6302499629491,
-      "projected_nt": 6.740380726109721
+      "photon_gain_vs_as_built": 112.02063831987992,
+      "projected_nt": 10.082126684833844
     },
     {
       "label": "freeform + quadratic",
       "photons_s": 74499604952.02368,
       "resolution_um": 0.7780644274563212,
       "overlap_volume_um3": 70.3125,
-      "photon_gain_vs_as_built": 248.57036613243653,
-      "projected_nt": 6.768362689887102
+      "photon_gain_vs_as_built": 111.09996134017405,
+      "projected_nt": 10.123981546622456
     }
   ],
   "assumption": "projected sensitivities assume this model misestimates a new tip by the same factor it misestimates the as-built tip; only the ratio is modelled, the anchor is measured"
