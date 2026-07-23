@@ -7,8 +7,8 @@ from contextlib import redirect_stdout
 
 import numpy as np
 
-from lens_design import (APERTURE_MARGIN, COMPARISON_NORMALIZATION, DEPTHS,
-                         EXPOSURE_MIN, MCF_FULL_NA,
+from lens_design import (APERTURE_MARGIN, COMPARISON_NORMALIZATION, CORE_R,
+                         DEPTHS, EXPOSURE_MIN, MCF_FULL_NA,
                          MCF_IPS_N, MCF_MFD, PRINT_X_UM, PRINT_Y_UM,
                          PRINT_Z_UM, RED_LAM, RED_W, SEARCH_DEPTHS,
                          SEARCH_RED_LAM, SEARCH_RED_W, _ProgressBar,
@@ -34,7 +34,14 @@ def main():
     # fit_surface still fits to Snell normals over the cap it is given.
     probe = fit_surface('quadratic', 'central', 5, 51, 18.0)
     assert np.isfinite(surface_limits(probe)['max_slope'])
-    assert MCF_MFD == 10.0
+    # MCF-007_3.  The datasheet fixes the mode field at 1550 nm only, so the
+    # model has to reproduce it there and must not carry it into the band we
+    # actually use, where the fiber is well above cutoff and the field is
+    # smaller.  Locking both ends stops the 1550 nm number being used at 700.
+    from lens_design import mcf_mode_radius
+    assert np.isclose(2.0*mcf_mode_radius(1550.0), 6.1, atol=0.05)
+    assert 4.5 < MCF_MFD < 6.0
+    assert CORE_R == 35.0        # core-to-core pitch, MCF-007_3
     assert (PRINT_X_UM, PRINT_Y_UM, PRINT_Z_UM) == (300.0, 300.0, 300.0)
     assert len(DEPTHS) == len(RED_LAM) == 33
     assert len(SEARCH_DEPTHS) == len(SEARCH_RED_LAM) == 9

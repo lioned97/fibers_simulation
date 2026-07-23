@@ -29,11 +29,9 @@ import os
 import numpy as np
 
 from compare_probes import AS_BUILT_GAPS, as_built_surfaces
-from lens_design import (I_SAT, MCF_FULL_NA, MCF_IPS_N, NV_SPECTRUM_NM,
-                         P_GREEN_MW, RED_DESIGN_NM, RHO, R_SAT, SEARCH_DEPTHS,
-                         SEARCH_RED_LAM, SEARCH_RED_W, W_MODE, _field_axis,
-                         _ray_density, beam_stats, diamond_sellmeier,
-                         escape_ceiling, replicated_surfaces, trace_full_na)
+from lens_design import (NV_SPECTRUM_NM, RED_DESIGN_NM, SEARCH_DEPTHS,
+                         SEARCH_RED_LAM, SEARCH_RED_W, escape_ceiling,
+                         evaluate_design)
 from method_export import METHODS_DIRNAME, headline_label, list_methods
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -60,68 +58,24 @@ def _quadrature(coarse):
 
 
 def collection_efficiency(central, side, coarse=False):
-    """Excitation-weighted collection efficiency, and the field it comes from.
+    """Excitation-weighted collection efficiency of one printed tip.
 
-    Mirrors lens_design's own signal field exactly, but keeps the numerator and
-    the denominator apart: evaluate_design multiplies them together into a
-    photon rate, which cannot be compared across probes without also agreeing
-    on pump power and NV density.  A ratio needs neither.
+    This used to duplicate lens_design's signal field line for line so it
+    could keep the numerator and denominator apart.  evaluate_design now
+    returns both integrals itself (model_excited_rate_s and the photon rate),
+    and the two implementations were cross-checked to agree to every printed
+    digit -- so the duplicate physics is gone and this is a thin renaming
+    wrapper around the one tracer everyone else uses.
     """
     depths, red_lam, red_w, grid_n, ray_grid = _quadrature(coarse)
-    union = replicated_surfaces(central, side)
-
-    central_trace = trace_full_na(central, union, 532.0, depths, ray_grid)
-    stats = beam_stats(central_trace, 532.0, depths)
-    side_traces = []
-    for lam, weight in zip(red_lam, red_w):
-        trace = trace_full_na(side, union, float(lam), depths, ray_grid)
-        side_traces.append((float(lam), float(weight), trace))
-        stats = stats + beam_stats(trace, float(lam), depths)
-
-    axis = _field_axis(stats, grid_n)
-    dx = axis[1]-axis[0]
-    dz = float(depths[-1]-depths[0])/(len(depths)-1)
-
-    emitted = collected = 0.0
-    peak = 0.0
-    planes = []
-    for iz in range(len(depths)):
-        intensity = P_GREEN_MW*_ray_density(central_trace, iz, axis, 532.0)
-        saturation = intensity/I_SAT
-        excitation = R_SAT*saturation/(1.0+saturation)
-
-        collection = np.zeros_like(excitation)
-        for lam, weight, trace in side_traces:
-            n_dia = float(diamond_sellmeier(lam/1000.0))
-            theta_ips = np.arcsin(MCF_FULL_NA/MCF_IPS_N)
-            solid_angle = 2*np.pi*(1.0-np.cos(theta_ips))
-            core_area = 0.5*np.pi*W_MODE*W_MODE
-            acceptance = (core_area*MCF_IPS_N**2*solid_angle /
-                          (4*np.pi*n_dia*n_dia))
-            # held to the escape ceiling at this wavelength, exactly as
-            # lens_design does: etendue bounds the integral, not the value at
-            # a point, so a tightly focused design would otherwise report more
-            # light leaving the diamond than can leave it.
-            contribution = acceptance*_ray_density(
-                trace, iz, axis, lam, np.arange(6)*np.pi/3.0)
-            collection += weight*np.minimum(contribution, escape_ceiling(lam))
-
-        signal = excitation*collection
-        planes.append(signal)
-        peak = max(peak, float(signal.max()))
-        volume = dx*dx*dz*(0.5 if iz in (0, len(depths)-1) else 1.0)
-        emitted += float(excitation.sum())*volume
-        collected += float(signal.sum())*volume
-
-    field = np.stack(planes)
-    core = field >= 0.5*peak if peak > 0.0 else np.zeros_like(field, dtype=bool)
-    sensing_volume = float(core.sum())*dx*dx*dz
-    sensing_area = float(core.any(axis=0).sum())*dx*dx
-    return dict(collection_efficiency=collected/max(emitted, 1e-30),
-                photons_s=RHO*collected,
-                sensing_volume_um3=sensing_volume,
-                sensing_area_um2=sensing_area,
-                sensing_diameter_um=2.0*np.sqrt(sensing_area/np.pi))
+    result = evaluate_design(central, side, grid_n=grid_n, depths=depths,
+                             red_lam=red_lam, red_w=red_w, ray_grid=ray_grid)
+    area = result["overlap_area_um2"]
+    return dict(collection_efficiency=result["collection_efficiency"],
+                photons_s=result["model_fiber_photons_s"],
+                sensing_volume_um3=result["overlap_volume_um3"],
+                sensing_area_um2=area,
+                sensing_diameter_um=2.0*np.sqrt(area/np.pi))
 
 
 def as_built_best(coarse=False):
@@ -143,6 +97,12 @@ def as_built_best(coarse=False):
 def multimode_reference(name="MM"):
     """Bare SM/MM fiber at contact, from the characterisation model.
 
+    Returns absolute photon rates as well as the ratio: ``created_photons_s`` is
+    what the green makes over the whole NV layer, ``collected_photons_s`` what
+    reaches the core.  Resolution is the second-moment FWHM of the collected
+    signal, the same definition ``evaluate_design`` uses, so the two tracers'
+    resolutions can sit in one table.
+
     A bare fiber has no printed cap, so it cannot be written as a surface in
     the design model; this is paper_figures' tracer, and is kept visually
     separate in the figure for that reason.
@@ -156,9 +116,22 @@ def multimode_reference(name="MM"):
                             0.0, config["model"])
     rate, _ = P.exc_rate(config["exc"], emitters[:, 0], emitters[:, 1],
                          emitters[:, 2], 0.0)
-    carried = rate*eta*density
-    return dict(collection_efficiency=float(
-        config["tf"]*carried.sum()/(rate*density).sum()))
+    carried = config["tf"]*rate*eta*density
+    # sample_ensemble's weights are density/pdf, so a population total is the
+    # mean of weight times the quantity -- these are absolute photons/s over
+    # the whole layer, not per emitter
+    created = float(np.mean(rate*density))
+    collected = float(np.mean(carried))
+    weight = carried/max(carried.sum(), 1e-30)
+    centre = (weight[:, None]*emitters[:, :2]).sum(axis=0)
+    spread = emitters[:, :2]-centre
+    variance = (weight[:, None]*spread*spread).sum(axis=0)
+    green_radius = float(P.exc_width(config["exc"], 85.0, 0.0))
+    return dict(collection_efficiency=collected/max(created, 1e-30),
+                created_photons_s=created, collected_photons_s=collected,
+                green_spot_diameter_um=2.0*green_radius,
+                resolution_um=float(2.0*np.sqrt(2.0*np.log(2.0)) *
+                                    np.sqrt(0.5*variance.sum())))
 
 
 def build(coarse=False, with_multimode=True):

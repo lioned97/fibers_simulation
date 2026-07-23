@@ -51,15 +51,23 @@ the diamond escape cone, `lru_cache`d — with a per-wavelength clamp applied in
 `_combined_overlap_plane`, and mirrored in `compare_collection.py` and
 `figure_photon_budget.py`.
 
-**Corrected headline numbers (use these, not the old ones):**
-- the chosen design is **`quadratic + biconic`** — the geometry in the top-level
-  `mcf_freeform_design.json` and in the printed STLs. Every figure is pinned to
-  it via `method_export.headline_label()`; do not let a figure re-sort and pick
-  its own "best" (see the tie below)
-- chosen design collection **1.874%**, as-built **0.00963%**, **x195**
-  (NOT 3.6% / x840, not x490, not x456, not x212, not x204 — the escape ceiling,
-  the as-built geometry, the field grid and the design pinning have each moved it)
-- photon budget: 0.96 vs 187 collected per 10,000 emitted
+**Current headline numbers (2026-07-23, post fresh search on MCF-007_3):**
+- the chosen design is **`asphere + biconic`** from the fresh search — the
+  geometry in the top-level `mcf_freeform_design.json` and the printed STLs.
+  **16.15 nT/sqrt(Hz)** raw model sensitivity, air gap 7 um, resolution
+  0.82 um. Every figure is pinned to it via `method_export.headline_label()`;
+  do not let a figure re-sort and pick its own "best".
+- chosen design collection **1.310%**, as-built **0.00307%** (at its own best
+  50 um standoff), **x426**. Every earlier gain in this file's history is
+  superseded: x840 -> x490 -> x456 -> x212 -> x204 -> x195 -> x255 -> **x426**
+  (escape ceiling, as-built geometry, field grid, design pinning, fiber part
+  number, and finally a search actually optimized for MCF-007_3).
+- photon budget: 0.31 vs 131 collected per 10,000 emitted
+- absolute counts at 10 mW green: as-built 2.1e8/s, new design **8.5e10/s**
+  (x397 in counts), new-design green spot 3.8 um, resolution 0.85 um
+- the top three (asphere+freeform 16.88, biconic+freeform 16.72,
+  asphere+biconic 16.15) sit within 4.5% and the 241->321 re-score reshuffled
+  them — the family tie persists on the new fiber; do not rank families.
 - corrected winner: `quadratic + biconic`, 13.28 nT/sqrt(Hz) (was 10.42 unclamped)
 - top designs collapse to 13.28-13.48 nT — **statistically tied, family ranking is
   not trustworthy**; do not claim one lens family beats another
@@ -154,15 +162,19 @@ already used `list_methods[0]`, which agrees. The eta table stays sorted by eta
 `figure_alignment_tolerance.py`, at grid_n=241, each tip normalised to its own
 peak:
 
-| | as-built | `quadratic + biconic` |
-|---|---|---|
-| best standoff | 12 um | 18 um |
-| half-signal standoff window | 5 - 84 um | **15.3 - 20.5 um** |
-| signal at +/-2 deg tilt | 97% | 98% |
-| signal at +/-5 deg tilt | 98% | 90% |
-| green-red shared volume at its best standoff | 6,221 um3 | 24.4 um3 |
+On MCF-007_3, with the fresh-search winner:
 
-The new tip buys its 195x with a standoff window of about +/-2.5 um. Tilt is a
+| | as-built | `asphere + biconic` (fresh search) |
+|---|---|---|
+| best standoff | 50 um | 7 um |
+| half-signal standoff window | 5 - 109 um | **5.0 - 10.0 um** |
+| signal at +/-2 deg tilt | 94% | 96% |
+| signal at +/-5 deg tilt | 93% | 94% |
+| green-red shared volume at its best standoff | 6,664 um3 | 14.5 um3 |
+
+The new tip buys its 426x with a standoff window of about +/-2.5 um, now
+centred at 7 um — the winner was optimized at (and wants) a near-contact gap,
+and the sweep floor is 5 um, so the low edge is the sweep limit, not physics. Tilt is a
 non-issue for both out to +/-10 deg. The few-percent ripple on the as-built
 standoff curve reproduces at grid_n 241/321/401 (spread 0.5-1.5%), so it is the
 model's ray optics — hard apertures, no wave averaging — not numerical noise.
@@ -177,6 +189,68 @@ was missing was a way to see it, so `evaluate_design` now also returns
 `(int s)^2 / int s^2` of the green-times-red field: the half-maximum core volume
 is a threshold statistic and jumped two orders of magnitude between neighbouring
 standoffs, while the participation ratio is smooth and needs no threshold.
+
+## The fiber is MCF-007_3, not MCF-007_2 (changed 2026-07-22)
+
+The model carried MCF-007_2's numbers. The part in hand is **MCF-007_3**:
+
+| | MCF-007_2 (was in the model) | MCF-007_3 (in hand) |
+|---|---|---|
+| NA | 0.22 | **0.21** |
+| mode field diameter | 10 um | **5.7-6.5 um, quoted at 1550 nm** |
+| core diameter | 9 um | not quoted |
+| core-to-core | 37 um | 35 um (already right) |
+| cladding | 125 um | 125 um |
+
+**The mode field must not be used at 1550 nm's value.** The datasheet specifies
+it where the fiber is single mode; we work at 532 nm and 650-800 nm, where it is
+well above cutoff. `paper_figures.mcf_mode_radius(lam)` inverts the datasheet to
+a core radius and carries it across:
+
+- core radius **2.661 um** (5.32 um core) from MFD 6.1 um and NA 0.21 at 1550 nm
+- mode-field-vs-radius has a minimum, so two radii fit; the larger one is taken
+  because it puts the **cutoff at 1460 nm**, just under the quoted 1520-1650 nm
+  window, which is where a real single-mode fiber is designed to sit. The
+  smaller root would put cutoff near 930 nm.
+- V = 2.27 at 1550 (single mode, reproduces MFD 6.10), 5.02 at 700 nm and 6.60
+  at 532 nm (above cutoff, so the guided field fills the core and the mode
+  radius stops depending on wavelength)
+- so **W_MODE = 2.661 um in band, not 5.0**
+
+Effect: a core's acceptance goes as mode area times NA squared, so both MCF tips
+lost roughly 4x. The as-built tip's best standoff moved from 10 to 50 um.
+
+**The exported geometries were optimized for MCF-007_2.** Apertures in
+`lens_design` are derived from the beam footprint, which just shrank by half, so
+every cap is now oversized relative to the beam it serves. They are still valid
+surfaces scored honestly, but they are the wrong fiber's designs. This is now
+the strongest reason to re-run the search.
+
+## Photon counts and resolution (`photon_counts.py`, 2026-07-22)
+
+10 mW green, integrated over the 80-90 um layer. Created is
+`RHO * R_SAT * s/(1+s)` with `s = I_green/I_SAT`, so the green intensity per
+unit volume sets it and it saturates:
+
+| probe | created 1/s | collected 1/s | eta | x counts | green 1/e^2 | resolution |
+|---|---|---|---|---|---|---|
+| SM bare fiber | 6.99e12 | 2.86e8 | 0.00409% | 1.34 | 9.3 um | 3.15 um |
+| MM bare fiber | 7.24e12 | 6.96e9 | 0.09616% | 32.5 | 65.5 um | 30.6 um |
+| MCF as-built, 50 um | 6.96e12 | 2.14e8 | 0.00307% | 1 | 76.6 um | 26.9 um |
+| **MCF new design** | 6.48e12 | **8.49e10** | **1.31039%** | **397** | 3.8 um | **0.85 um** |
+
+Created is nearly equal across probes because saturation flattens it, so the
+count ratios track the efficiency ratios. Resolution follows the green spot in
+every case, which is the point: an NV only signals where it is pumped.
+
+**Open question for the user:** `sensitivity.MEASURED` carries resolutions of
+3.5 / 49 / 1.5 um for SM / MM / MCF. The model reproduces SM (3.15) and is in
+range for MM (30.6), but gives the as-built MCF **26.9 um** against a recorded
+1.5 um. Its modelled green spot at the NV layer is 77 um wide -- the printed
+central cap (R = 74.91 um) barely focuses at that standoff. Either the 1.5 um is
+a design intent rather than a measurement, or the real green delivery is far
+tighter than this model makes it. Worth resolving before the resolution row is
+quoted anywhere.
 
 ## File inventory
 
@@ -194,6 +268,8 @@ Created:
 - `compare_collection.py`, `compare_probes.py` — the PI deliverables.
 - `figure_photon_budget.py` — 3 panels: as-built map, new-design map (shared log
   scale, green excitation contour), photon budget bars.
+- `photon_counts.py` — created vs collected photons/s for all four probes, plus
+  resolution against green spot size. The absolute-count deliverable.
 - `figure_alignment_tolerance.py` — standoff and diamond-tilt tolerance, both
   MCF tips, each against its own peak. Reuses `lens_design.alignment_sweep`.
 - `figure_ray_budget.py` — 5 panels: SM, MM, as-built and new-design meridional
@@ -206,6 +282,60 @@ Created:
 Modified: `app.py` (batched 3D traces 5000->4 via None separators, LineCollection
 in 2D, fiber-type selector, Z-sweep 0-500).
 
+## Run order
+
+Anything that changes a fiber constant, the as-built geometry or the field grid
+invalidates everything downstream. Run in this order; each step reads the one
+before it.
+
+```
+py test_physics.py            # fast sanity
+py test_lens_design.py        # locks the datasheet round-trip and the cap sign
+py compare_collection.py      # FIRST: writes collection_comparison.json, which
+                              # fixes the as-built best standoff every other
+                              # script reads
+py photon_counts.py           # created vs collected counts, resolution
+py compare_probes.py          # projected sensitivities
+py figure_photon_budget.py    # per-10,000 maps and bars
+py figure_ray_budget.py       # 5-panel ray figure
+py figure_alignment_tolerance.py   # slowest, ~10 min: tilt costs 6x a standoff
+py paper_figures.py           # the characterisation figures; slowest overall
+```
+
+`recompute_corrected.py` is **not** in this list and must not be re-run.
+
+## Phase-3 search corrected (2026-07-22)
+
+The search itself was still scoring on the old numbers; fixed and relaunched:
+
+- **Full stage now scores at `SEARCH_GRID_N = 241`** (was 81) and the final
+  re-score at `FINAL_GRID_N = 321` (was 161). Ray tracing dominates the cost —
+  0.86 s at 81 vs 0.98 s at 241 per evaluation — so the coarse mesh was buying
+  ~15% speed while leaving the objective unable to resolve the sub-2-um spots
+  it selects for. The proxy stage stays at 41: it only rejects bad regions.
+- **The checkpoint signature now includes `W_MODE` and all three grid
+  constants.** The fiber changed from MCF-007_2 to MCF-007_3 and only the NA
+  happened to be in the signature; a stale checkpoint from the old mode field
+  would have been silently resumed under the new one.
+- The MCF-007_2 search artifacts (16 method folders, winner JSON, STLs, old
+  checkpoint) are preserved under `figures/mcf007_2_backup/`.
+- `compare_collection.collection_efficiency` is now a thin wrapper over
+  `evaluate_design` — the ~60-line duplicate of the signal field is deleted.
+  Verified identical before deletion: eta 0.00307% / 0.78327%, photons/s
+  2.141e8 / 5.306e10 on both paths.
+
+**The fresh search completed 2026-07-23** (exit 0, all 16 pairings, fresh from
+a rejected old-signature checkpoint). Winner `asphere + biconic` at 16.15 nT.
+The 241->321 re-score moved the leaders by up to 8.6% and re-ordered them, so
+the finer final grid is doing real work. The pipeline has been re-run on the
+new winner. `figure_photon_budget` was found still selecting `list_methods[0]`
+(the summaries sort by search-grid sensitivity, which disagrees with the final
+re-score) — now pinned through `headline_label()` like every other figure.
+
+Sanity anchor: old-fiber winner was 13.28 nT; MCF-007_3's mode field costs ~4x
+in photons ~ 2x in shot noise, and the new winner lands at 16.15 — better than
+the naive ~26 because the search re-optimized the caps for the smaller mode.
+
 ## Pending
 
 1. ~~Confirm the stale search is dead~~ — done, and do **not** re-run
@@ -215,10 +345,8 @@ in 2D, fiber-type selector, Z-sweep 0-500).
 3. Re-run `paper_figures.py` at full fidelity. `compare_collection.py`,
    `compare_probes.py`, `figure_photon_budget.py` and `figure_ray_budget.py` have
    all been re-run on the corrected as-built geometry.
-4. The search's own transverse grid is still the coarse one — a fresh search
-   should run the objective at a mesh that resolves the spots it is selecting
-   for, or it will keep preferring designs the scoring cannot integrate.
-5. Decide whether to launch a **fresh** search under the corrected model — the
+4. ~~Search grid too coarse~~ — fixed: SEARCH_GRID_N 241 / FINAL_GRID_N 321.
+5. Fresh search **launched** under the corrected model + MCF-007_3 — the
    current geometries were optimized against the wrong objective, so they are
    valid designs scored honestly, not designs optimized honestly.
 5. Open question for the user: `paper_figures.py` integrates 640-800 nm while

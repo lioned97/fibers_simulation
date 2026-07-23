@@ -27,7 +27,7 @@ from lens_design import (I_SAT, MCF_FULL_NA, MCF_IPS_N, P_GREEN_MW,
                          RED_DESIGN_NM, R_SAT, W_MODE, _field_axis,
                          _ray_density, beam_stats, diamond_sellmeier,
                          escape_ceiling, replicated_surfaces, trace_full_na)
-from method_export import METHODS_DIRNAME, list_methods
+from method_export import METHODS_DIRNAME, headline_label, list_methods
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 METHODS = os.path.join(HERE, "figures", METHODS_DIRNAME)
@@ -101,7 +101,11 @@ def main(coarse=False):
         raise SystemExit(f"no exported designs in {METHODS}")
 
     gap, old = as_built_best(coarse)
-    new_design = designs[0]
+    # the exported winner, not list_methods[0]: the summaries sort by the
+    # search-grid sensitivity, and that ordering disagrees with the final
+    # re-score that actually chose the design
+    chosen = headline_label(os.path.dirname(METHODS))
+    new_design = next(d for d in designs if d["label"] == chosen)
     new = fields(*_surfaces_of(new_design), coarse=coarse)
     ceiling = escape_ceiling(RED_DESIGN_NM)
 

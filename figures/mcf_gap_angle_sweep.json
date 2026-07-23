@@ -1,380 +1,536 @@
 {
-  "best_gap_um": 172.75536472961107,
+  "best_gap_um": 7.125513351514991,
   "gap": [
     {
       "gap_um": 5.0,
-      "model_fiber_photons_s": 1.1157405641887912e-23,
-      "comparison_normalized_cps": 1.2235066196923608e-22,
-      "raw_model_sensitivity_nt": 1.428592438367506e+18,
-      "comparison_normalized_sensitivity_nt": 4.3140661161444794e+17
+      "model_fiber_photons_s": 47341660842.596,
+      "collection_efficiency": 0.007185559122829967,
+      "overlap_volume_um3": 5.859375,
+      "effective_volume_um3": 16.51816485920022,
+      "comparison_normalized_cps": 519142507561.8733,
+      "raw_model_sensitivity_nt": 21.935516279707556,
+      "comparison_normalized_sensitivity_nt": 6.624091307004248
     },
     {
       "gap_um": 5.968883208572184,
-      "model_fiber_photons_s": 1.352132106030577e-23,
-      "comparison_normalized_cps": 1.4827305159688157e-22,
-      "raw_model_sensitivity_nt": 1.2977182042069484e+18,
-      "comparison_normalized_sensitivity_nt": 3.918851859156249e+17
+      "model_fiber_photons_s": 66650609424.811676,
+      "collection_efficiency": 0.010183472677617924,
+      "overlap_volume_um3": 9.765625,
+      "effective_volume_um3": 15.591899246884463,
+      "comparison_normalized_cps": 730881931294.4575,
+      "raw_model_sensitivity_nt": 18.485223354730437,
+      "comparison_normalized_sensitivity_nt": 5.582171204485289
     },
     {
       "gap_um": 7.125513351514991,
-      "model_fiber_photons_s": 1.6659883272238978e-23,
-      "comparison_normalized_cps": 1.8269011740830989e-22,
-      "raw_model_sensitivity_nt": 1.1691062546702188e+18,
-      "comparison_normalized_sensitivity_nt": 3.5304692535044064e+17
+      "model_fiber_photons_s": 79462828213.11206,
+      "collection_efficiency": 0.012191676846968898,
+      "overlap_volume_um3": 11.71875,
+      "effective_volume_um3": 16.769240467726927,
+      "comparison_normalized_cps": 871379059422.3535,
+      "raw_model_sensitivity_nt": 16.928934713539633,
+      "comparison_normalized_sensitivity_nt": 5.112202869669377
     },
     {
       "gap_um": 8.506271399262944,
-      "model_fiber_photons_s": 2.0680461644650074e-23,
-      "comparison_normalized_cps": 2.267792579444296e-22,
-      "raw_model_sensitivity_nt": 1.04932458725225e+18,
-      "comparison_normalized_sensitivity_nt": 3.168752350303067e+17
+      "model_fiber_photons_s": 62420703461.78697,
+      "collection_efficiency": 0.009521358410324789,
+      "overlap_volume_um3": 11.81640625,
+      "effective_volume_um3": 18.984488657542936,
+      "comparison_normalized_cps": 684497331571.6744,
+      "raw_model_sensitivity_nt": 19.10125676974696,
+      "comparison_normalized_sensitivity_nt": 5.768201090319803
     },
     {
       "gap_um": 10.154588104523683,
-      "model_fiber_photons_s": 2.5922580596579772e-23,
-      "comparison_normalized_cps": 2.8426365391208856e-22,
-      "raw_model_sensitivity_nt": 9.372400782208705e+17,
-      "comparison_normalized_sensitivity_nt": 2.830279340387433e+17
+      "model_fiber_photons_s": 34244800047.864185,
+      "collection_efficiency": 0.00517202554728835,
+      "overlap_volume_um3": 7.08984375,
+      "effective_volume_um3": 24.866848703279476,
+      "comparison_normalized_cps": 375524032139.729,
+      "raw_model_sensitivity_nt": 25.794084454706013,
+      "comparison_normalized_sensitivity_nt": 7.789302445851957
     },
     {
       "gap_um": 12.122310085411646,
-      "model_fiber_photons_s": 3.334240178193079e-23,
-      "comparison_normalized_cps": 3.6562844989233487e-22,
-      "raw_model_sensitivity_nt": 8.264023351747594e+17,
-      "comparison_normalized_sensitivity_nt": 2.4955713167249494e+17
+      "model_fiber_photons_s": 16412485982.847721,
+      "collection_efficiency": 0.002457804563789099,
+      "overlap_volume_um3": 4.7265625,
+      "effective_volume_um3": 95.06739944640528,
+      "comparison_normalized_cps": 179977190846.53137,
+      "raw_model_sensitivity_nt": 37.278992936385464,
+      "comparison_normalized_sensitivity_nt": 11.257517256260172
     },
     {
       "gap_um": 14.471330623583757,
-      "model_fiber_photons_s": 4.4187357787874393e-23,
-      "comparison_normalized_cps": 4.845528297116853e-22,
-      "raw_model_sensitivity_nt": 7.1786201352216e+17,
-      "comparison_normalized_sensitivity_nt": 2.1678010504816352e+17
+      "model_fiber_photons_s": 8428351350.771643,
+      "collection_efficiency": 0.0012560197897647203,
+      "overlap_volume_um3": 33.75,
+      "effective_volume_um3": 208.2357825120994,
+      "comparison_normalized_cps": 92424206860.84572,
+      "raw_model_sensitivity_nt": 52.072665588879886,
+      "comparison_normalized_sensitivity_nt": 15.72491328954657
     },
     {
       "gap_um": 17.275536472961107,
-      "model_fiber_photons_s": 6.020023166689665e-23,
-      "comparison_normalized_cps": 6.601479260997695e-22,
-      "raw_model_sensitivity_nt": 6.150224007445426e+17,
-      "comparison_normalized_sensitivity_nt": 1.8572457955565024e+17
+      "model_fiber_photons_s": 4854863087.06498,
+      "collection_efficiency": 0.000721622899970211,
+      "overlap_volume_um3": 146.25,
+      "effective_volume_um3": 299.43589347820506,
+      "comparison_normalized_cps": 53237798421.73964,
+      "raw_model_sensitivity_nt": 68.74201950271971,
+      "comparison_normalized_sensitivity_nt": 20.75872790079381
     },
     {
       "gap_um": 20.623131914506757,
-      "model_fiber_photons_s": 8.495933629027126e-23,
-      "comparison_normalized_cps": 9.316530535160099e-22,
-      "raw_model_sensitivity_nt": 5.177075693953234e+17,
-      "comparison_normalized_sensitivity_nt": 1.5633742859174595e+17
+      "model_fiber_photons_s": 3111638208.590433,
+      "collection_efficiency": 0.000461810156328406,
+      "overlap_volume_um3": 112.2265625,
+      "effective_volume_um3": 434.233179302685,
+      "comparison_normalized_cps": 34121820685.67226,
+      "raw_model_sensitivity_nt": 86.09966635204256,
+      "comparison_normalized_sensitivity_nt": 26.000393341375002
     },
     {
       "gap_um": 24.619413158533703,
-      "model_fiber_photons_s": 1.7105268639806837e-22,
-      "comparison_normalized_cps": 1.875741555353057e-21,
-      "raw_model_sensitivity_nt": 3.648591177272259e+17,
-      "comparison_normalized_sensitivity_nt": 1.101802245819025e+17
+      "model_fiber_photons_s": 2143416318.8867726,
+      "collection_efficiency": 0.00031783951952232207,
+      "overlap_volume_um3": 99.53125,
+      "effective_volume_um3": 818.7340742824524,
+      "comparison_normalized_cps": 23504425124.323574,
+      "raw_model_sensitivity_nt": 104.10498884960505,
+      "comparison_normalized_sensitivity_nt": 31.437643995294955
     },
     {
       "gap_um": 29.390080361374572,
-      "model_fiber_photons_s": 1.243878446141853e-21,
-      "comparison_normalized_cps": 1.3640209577337636e-20,
-      "raw_model_sensitivity_nt": 1.3530104105874642e+17,
-      "comparison_normalized_sensitivity_nt": 4.085823367353247e+16
+      "model_fiber_photons_s": 1429481744.798399,
+      "collection_efficiency": 0.0002118608529107495,
+      "overlap_volume_um3": 316.40625,
+      "effective_volume_um3": 1248.6782018027754,
+      "comparison_normalized_cps": 15675511257.958414,
+      "raw_model_sensitivity_nt": 128.18598662203192,
+      "comparison_normalized_sensitivity_nt": 38.709628204569654
     },
     {
       "gap_um": 35.08519143351914,
-      "model_fiber_photons_s": 3.161845772038201e-20,
-      "comparison_normalized_cps": 3.467239030919071e-19,
-      "raw_model_sensitivity_nt": 2.6836120503393332e+16,
-      "comparison_normalized_sensitivity_nt": 8103976686643831.0
+      "model_fiber_photons_s": 899444098.9036058,
+      "collection_efficiency": 0.00013326198289167357,
+      "overlap_volume_um3": 345.0,
+      "effective_volume_um3": 1630.2656553677302,
+      "comparison_normalized_cps": 9863187235.21451,
+      "raw_model_sensitivity_nt": 163.1414761515167,
+      "comparison_normalized_sensitivity_nt": 49.26549346763358
     },
     {
       "gap_um": 41.88388200341461,
-      "model_fiber_photons_s": 1.7560302951842113e-19,
-      "comparison_normalized_cps": 1.9256400273483906e-18,
-      "raw_model_sensitivity_nt": 1.1387390522085268e+16,
-      "comparison_normalized_sensitivity_nt": 3438766318738919.0
+      "model_fiber_photons_s": 607756590.3283186,
+      "collection_efficiency": 9.002814212481144e-05,
+      "overlap_volume_um3": 461.953125,
+      "effective_volume_um3": 2375.7955712184457,
+      "comparison_normalized_cps": 6664579879.0061245,
+      "raw_model_sensitivity_nt": 201.2497891904103,
+      "comparison_normalized_sensitivity_nt": 60.77344896349106
     },
     {
       "gap_um": 49.99999999999999,
-      "model_fiber_photons_s": 1.0289044723409814e-18,
-      "comparison_normalized_cps": 1.1282832885578014e-17,
-      "raw_model_sensitivity_nt": 4704398543191872.0,
-      "comparison_normalized_sensitivity_nt": 1420635151563261.2
+      "model_fiber_photons_s": 401408475.0632174,
+      "collection_efficiency": 5.945375718837669e-05,
+      "overlap_volume_um3": 895.78125,
+      "effective_volume_um3": 3878.9490573240005,
+      "comparison_normalized_cps": 4401793232.260402,
+      "raw_model_sensitivity_nt": 252.3834888387585,
+      "comparison_normalized_sensitivity_nt": 76.21481314277561
     },
     {
       "gap_um": 59.68883208572184,
-      "model_fiber_photons_s": 1.905661095099591e-17,
-      "comparison_normalized_cps": 2.0897232202360098e-16,
-      "raw_model_sensitivity_nt": 1093195995871702.0,
-      "comparison_normalized_sensitivity_nt": 330123531206995.4
+      "model_fiber_photons_s": 291529810.4573971,
+      "collection_efficiency": 4.317504422661498e-05,
+      "overlap_volume_um3": 1716.40625,
+      "effective_volume_um3": 6421.305002003079,
+      "comparison_normalized_cps": 3196878059.1177855,
+      "raw_model_sensitivity_nt": 303.28532267408326,
+      "comparison_normalized_sensitivity_nt": 91.5861584404959
     },
     {
       "gap_um": 71.25513351514995,
-      "model_fiber_photons_s": 3.4306123250920063e-15,
-      "comparison_normalized_cps": 3.7619649442431176e-14,
-      "raw_model_sensitivity_nt": 81473424436946.84,
-      "comparison_normalized_sensitivity_nt": 24603359942975.65
+      "model_fiber_photons_s": 190805346.4092462,
+      "collection_efficiency": 2.825630093371835e-05,
+      "overlap_volume_um3": 826.875,
+      "effective_volume_um3": 9125.141321626941,
+      "comparison_normalized_cps": 2092346661.0191746,
+      "raw_model_sensitivity_nt": 388.3843146759553,
+      "comparison_normalized_sensitivity_nt": 117.28436795452971
     },
     {
       "gap_um": 85.06271399262944,
-      "model_fiber_photons_s": 1.2892500482000146e-12,
-      "comparison_normalized_cps": 1.4137748675995119e-11,
-      "raw_model_sensitivity_nt": 4202888527365.737,
-      "comparison_normalized_sensitivity_nt": 1269189063226.4812
+      "model_fiber_photons_s": 133044744.10367398,
+      "collection_efficiency": 1.970206142898635e-05,
+      "overlap_volume_um3": 1653.75,
+      "effective_volume_um3": 9970.24208138805,
+      "comparison_normalized_cps": 1458951393.8168297,
+      "raw_model_sensitivity_nt": 488.7828899179427,
+      "comparison_normalized_sensitivity_nt": 147.60274847568002
     },
     {
       "gap_um": 101.54588104523683,
-      "model_fiber_photons_s": 6.910030440306153e-09,
-      "comparison_normalized_cps": 7.577449684405076e-08,
-      "raw_model_sensitivity_nt": 57408198379.851364,
-      "comparison_normalized_sensitivity_nt": 17336138479.245243
+      "model_fiber_photons_s": 95387171.12614508,
+      "collection_efficiency": 1.412515156501699e-05,
+      "overlap_volume_um3": 888.125,
+      "effective_volume_um3": 14655.432729424734,
+      "comparison_normalized_cps": 1046003336.7292622,
+      "raw_model_sensitivity_nt": 616.2283111287093,
+      "comparison_normalized_sensitivity_nt": 186.0887405989066
     },
     {
       "gap_um": 121.2231008541164,
-      "model_fiber_photons_s": 0.00027457441122594856,
-      "comparison_normalized_cps": 0.003010947352060568,
-      "raw_model_sensitivity_nt": 288003641.2226742,
-      "comparison_normalized_sensitivity_nt": 86971393.41887972
+      "model_fiber_photons_s": 60448867.01645364,
+      "collection_efficiency": 8.951358674623564e-06,
+      "overlap_volume_um3": 1653.75,
+      "effective_volume_um3": 12203.978078576763,
+      "comparison_normalized_cps": 662874429.0686176,
+      "raw_model_sensitivity_nt": 845.7962157403865,
+      "comparison_normalized_sensitivity_nt": 255.41369935140082
     },
     {
       "gap_um": 144.71330623583756,
-      "model_fiber_photons_s": 220.39036894539606,
-      "comparison_normalized_cps": 2416.7721778331547,
-      "raw_model_sensitivity_nt": 321461.8740908482,
-      "comparison_normalized_sensitivity_nt": 97075.11683544796
+      "model_fiber_photons_s": 39096904.71306825,
+      "collection_efficiency": 5.789449819971686e-06,
+      "overlap_volume_um3": 918.75,
+      "effective_volume_um3": 13195.83795541885,
+      "comparison_normalized_cps": 428731582.0654019,
+      "raw_model_sensitivity_nt": 1167.341123498447,
+      "comparison_normalized_sensitivity_nt": 352.5138907091967
     },
     {
       "gap_um": 172.75536472961107,
-      "model_fiber_photons_s": 5344540897.17776,
-      "comparison_normalized_cps": 58607541724.2523,
-      "raw_model_sensitivity_nt": 65.27815413346967,
-      "comparison_normalized_sensitivity_nt": 19.71270918901594
+      "model_fiber_photons_s": 30447296.295997486,
+      "collection_efficiency": 4.508627088712038e-06,
+      "overlap_volume_um3": 2082.5,
+      "effective_volume_um3": 14074.631075937543,
+      "comparison_normalized_cps": 333881098.93604475,
+      "raw_model_sensitivity_nt": 1462.7257641822423,
+      "comparison_normalized_sensitivity_nt": 441.7141997252282
     },
     {
       "gap_um": 206.23131914506757,
-      "model_fiber_photons_s": 2.5938251476853917,
-      "comparison_normalized_cps": 28.44354987509984,
-      "raw_model_sensitivity_nt": 2963385.295244794,
-      "comparison_normalized_sensitivity_nt": 894883.6454647131
+      "model_fiber_photons_s": 21049345.081592124,
+      "collection_efficiency": 3.1169363246299797e-06,
+      "overlap_volume_um3": 4011.875,
+      "effective_volume_um3": 17119.71411232033,
+      "comparison_normalized_cps": 230824385.8306028,
+      "raw_model_sensitivity_nt": 2001.7395663145583,
+      "comparison_normalized_sensitivity_nt": 604.4856884621042
     },
     {
       "gap_um": 246.19413158533706,
-      "model_fiber_photons_s": 3.950845418196436e-11,
-      "comparison_normalized_cps": 4.332445801196706e-10,
-      "raw_model_sensitivity_nt": 759258238709.5258,
-      "comparison_normalized_sensitivity_nt": 229280944869.29388
+      "model_fiber_photons_s": 13625377.207456443,
+      "collection_efficiency": 2.0176676517631676e-06,
+      "overlap_volume_um3": 1745.625,
+      "effective_volume_um3": 13135.158608422384,
+      "comparison_normalized_cps": 149414117.79940954,
+      "raw_model_sensitivity_nt": 2837.015623012729,
+      "comparison_normalized_sensitivity_nt": 856.7225082191865
     },
     {
       "gap_um": 293.90080361374584,
-      "model_fiber_photons_s": 4.8135221839354323e-17,
-      "comparison_normalized_cps": 5.278445944432389e-16,
-      "raw_model_sensitivity_nt": 687795515913117.2,
-      "comparison_normalized_sensitivity_nt": 207700618479234.78
+      "model_fiber_photons_s": 10281745.272723498,
+      "collection_efficiency": 1.5226070726867378e-06,
+      "overlap_volume_um3": 1561.875,
+      "effective_volume_um3": 14268.03605562581,
+      "comparison_normalized_cps": 112748284.0270675,
+      "raw_model_sensitivity_nt": 3778.5894830428365,
+      "comparison_normalized_sensitivity_nt": 1141.0591584988863
     },
     {
       "gap_um": 350.85191433519145,
-      "model_fiber_photons_s": 2.409397347102315e-17,
-      "comparison_normalized_cps": 2.6421138553765866e-16,
-      "raw_model_sensitivity_nt": 972155506770609.0,
-      "comparison_normalized_sensitivity_nt": 293571701679654.06
+      "model_fiber_photons_s": 7254769.914543204,
+      "collection_efficiency": 1.0954938183277039e-06,
+      "overlap_volume_um3": 1163.75,
+      "effective_volume_um3": 12553.106904580802,
+      "comparison_normalized_cps": 79554865.16923541,
+      "raw_model_sensitivity_nt": 5242.007197713899,
+      "comparison_normalized_sensitivity_nt": 1582.982313562089
     },
     {
       "gap_um": 418.8388200341462,
-      "model_fiber_photons_s": 1.5983293113424478e-18,
-      "comparison_normalized_cps": 1.7527071755230378e-17,
-      "raw_model_sensitivity_nt": 3774477340582147.5,
-      "comparison_normalized_sensitivity_nt": 1139817372949840.2
+      "model_fiber_photons_s": 3712924.7881707638,
+      "collection_efficiency": 5.806283488519014e-07,
+      "overlap_volume_um3": 1715.0,
+      "effective_volume_um3": 10136.130716752044,
+      "comparison_normalized_cps": 40715451.266663045,
+      "raw_model_sensitivity_nt": 8557.30014611432,
+      "comparison_normalized_sensitivity_nt": 2584.1350979160884
     },
     {
       "gap_um": 500.0,
-      "model_fiber_photons_s": 1.984066701744623e-23,
-      "comparison_normalized_cps": 2.175701790730073e-22,
-      "raw_model_sensitivity_nt": 1.0713017645717546e+18,
-      "comparison_normalized_sensitivity_nt": 3.2351190714589734e+17
+      "model_fiber_photons_s": 1690202.2875308539,
+      "collection_efficiency": 3.6566086539490573e-07,
+      "overlap_volume_um3": 1225.0,
+      "effective_volume_um3": 5392.183724656446,
+      "comparison_normalized_cps": 18534538.88643646,
+      "raw_model_sensitivity_nt": 13209.154133578924,
+      "comparison_normalized_sensitivity_nt": 3988.902834717593
     }
   ],
   "angle": [
     {
       "angle_deg": -10.0,
-      "model_fiber_photons_s": 3507904831.8099093,
-      "comparison_normalized_cps": 38467229038.05811,
-      "raw_model_sensitivity_nt": 80.57260216465899,
-      "comparison_normalized_sensitivity_nt": 24.331329464780886
+      "model_fiber_photons_s": 49910042046.58145,
+      "collection_efficiency": 0.007576284409477785,
+      "overlap_volume_um3": 22.5,
+      "effective_volume_um3": 30.774529628175525,
+      "comparison_normalized_cps": 547307042453.1396,
+      "raw_model_sensitivity_nt": 21.362759669469042,
+      "comparison_normalized_sensitivity_nt": 6.451130158767223
     },
     {
       "angle_deg": -9.166666666666666,
-      "model_fiber_photons_s": 3836198859.7234335,
-      "comparison_normalized_cps": 42067258733.578804,
-      "raw_model_sensitivity_nt": 77.04778931243447,
-      "comparison_normalized_sensitivity_nt": 23.266905820700213
+      "model_fiber_photons_s": 56302488373.25081,
+      "collection_efficiency": 0.008570450780119638,
+      "overlap_volume_um3": 16.54296875,
+      "effective_volume_um3": 25.871290064755616,
+      "comparison_normalized_cps": 617405779092.6427,
+      "raw_model_sensitivity_nt": 20.113108547724035,
+      "comparison_normalized_sensitivity_nt": 6.073760279399626
     },
     {
       "angle_deg": -8.333333333333334,
-      "model_fiber_photons_s": 3681232044.1069217,
-      "comparison_normalized_cps": 40367912749.17158,
-      "raw_model_sensitivity_nt": 78.65356474241915,
-      "comparison_normalized_sensitivity_nt": 23.751818185247682
+      "model_fiber_photons_s": 48706263387.34632,
+      "collection_efficiency": 0.007386494203908206,
+      "overlap_volume_um3": 28.359375,
+      "effective_volume_um3": 38.35654104482446,
+      "comparison_normalized_cps": 534106561933.8227,
+      "raw_model_sensitivity_nt": 21.62664015181071,
+      "comparison_normalized_sensitivity_nt": 6.530816836157378
     },
     {
       "angle_deg": -7.5,
-      "model_fiber_photons_s": 4486231931.016547,
-      "comparison_normalized_cps": 49195437015.09826,
-      "raw_model_sensitivity_nt": 71.24836855435981,
-      "comparison_normalized_sensitivity_nt": 21.515595655971573
+      "model_fiber_photons_s": 58929090046.62976,
+      "collection_efficiency": 0.008965369821534029,
+      "overlap_volume_um3": 16.54296875,
+      "effective_volume_um3": 23.46213406011202,
+      "comparison_normalized_cps": 646208752093.904,
+      "raw_model_sensitivity_nt": 19.659248860678353,
+      "comparison_normalized_sensitivity_nt": 5.936703646256226
     },
     {
       "angle_deg": -6.666666666666666,
-      "model_fiber_photons_s": 4811097636.308988,
-      "comparison_normalized_cps": 52757872169.77345,
-      "raw_model_sensitivity_nt": 68.80110081474632,
-      "comparison_normalized_sensitivity_nt": 20.776569286444893
+      "model_fiber_photons_s": 58909146274.26718,
+      "collection_efficiency": 0.008971747712185533,
+      "overlap_volume_um3": 18.90625,
+      "effective_volume_um3": 25.92828079070339,
+      "comparison_normalized_cps": 645990051275.0,
+      "raw_model_sensitivity_nt": 19.66296612952479,
+      "comparison_normalized_sensitivity_nt": 5.937826187797417
     },
     {
       "angle_deg": -5.833333333333333,
-      "model_fiber_photons_s": 4971353347.527118,
-      "comparison_normalized_cps": 54515215496.81693,
-      "raw_model_sensitivity_nt": 67.68330905070289,
-      "comparison_normalized_sensitivity_nt": 20.439018320567207
+      "model_fiber_photons_s": 51274396006.37242,
+      "collection_efficiency": 0.0077767106278411845,
+      "overlap_volume_um3": 25.99609375,
+      "effective_volume_um3": 36.68894830022935,
+      "comparison_normalized_cps": 562268370874.6926,
+      "raw_model_sensitivity_nt": 21.077672777957936,
+      "comparison_normalized_sensitivity_nt": 6.36503956597153
     },
     {
       "angle_deg": -5.0,
-      "model_fiber_photons_s": 5210722673.105162,
-      "comparison_normalized_cps": 57140108449.49869,
-      "raw_model_sensitivity_nt": 66.11054780841636,
-      "comparison_normalized_sensitivity_nt": 19.96407558659284
+      "model_fiber_photons_s": 65205072888.08642,
+      "collection_efficiency": 0.009939778483519521,
+      "overlap_volume_um3": 14.1796875,
+      "effective_volume_um3": 21.544690066050762,
+      "comparison_normalized_cps": 715030365272.2396,
+      "raw_model_sensitivity_nt": 18.688741870395734,
+      "comparison_normalized_sensitivity_nt": 5.643629763893806
     },
     {
       "angle_deg": -4.166666666666666,
-      "model_fiber_photons_s": 5410510100.457051,
-      "comparison_normalized_cps": 59330951444.20567,
-      "raw_model_sensitivity_nt": 64.87858030559799,
-      "comparison_normalized_sensitivity_nt": 19.592045809774678
+      "model_fiber_photons_s": 58823952127.28124,
+      "collection_efficiency": 0.00895257530566901,
+      "overlap_volume_um3": 18.90625,
+      "effective_volume_um3": 27.122272776748904,
+      "comparison_normalized_cps": 645055823317.8751,
+      "raw_model_sensitivity_nt": 19.67730255897292,
+      "comparison_normalized_sensitivity_nt": 5.9421555054423685
     },
     {
       "angle_deg": -3.333333333333333,
-      "model_fiber_photons_s": 5315292186.060425,
-      "comparison_normalized_cps": 58286804154.80175,
-      "raw_model_sensitivity_nt": 65.45705038456667,
-      "comparison_normalized_sensitivity_nt": 19.766732312366972
+      "model_fiber_photons_s": 53344694912.69732,
+      "collection_efficiency": 0.008093682677854385,
+      "overlap_volume_um3": 18.90625,
+      "effective_volume_um3": 34.40579734001348,
+      "comparison_normalized_cps": 584970999943.9514,
+      "raw_model_sensitivity_nt": 20.664219993989832,
+      "comparison_normalized_sensitivity_nt": 6.240185016973593
     },
     {
       "angle_deg": -2.5,
-      "model_fiber_photons_s": 5398378915.10649,
-      "comparison_normalized_cps": 59197922440.35371,
-      "raw_model_sensitivity_nt": 64.95147794742782,
-      "comparison_normalized_sensitivity_nt": 19.61405945328271
+      "model_fiber_photons_s": 69509231645.62798,
+      "collection_efficiency": 0.010615260067550043,
+      "overlap_volume_um3": 14.1796875,
+      "effective_volume_um3": 20.58716022340976,
+      "comparison_normalized_cps": 762229211501.2262,
+      "raw_model_sensitivity_nt": 18.100634989670603,
+      "comparison_normalized_sensitivity_nt": 5.46603313810549
     },
     {
       "angle_deg": -1.666666666666666,
-      "model_fiber_photons_s": 5899456420.272301,
-      "comparison_normalized_cps": 64692673319.067535,
-      "raw_model_sensitivity_nt": 62.13241741255278,
-      "comparison_normalized_sensitivity_nt": 18.76275902593606
+      "model_fiber_photons_s": 57185248312.15943,
+      "collection_efficiency": 0.00869179786933415,
+      "overlap_volume_um3": 18.90625,
+      "effective_volume_um3": 29.2438218648413,
+      "comparison_normalized_cps": 627086009995.0586,
+      "raw_model_sensitivity_nt": 19.957521299970946,
+      "comparison_normalized_sensitivity_nt": 6.026776013236017
     },
     {
       "angle_deg": -0.8333333333333321,
-      "model_fiber_photons_s": 5862965028.122987,
-      "comparison_normalized_cps": 64292513449.56475,
-      "raw_model_sensitivity_nt": 62.32566052075878,
-      "comparison_normalized_sensitivity_nt": 18.821114615879022
+      "model_fiber_photons_s": 55244280724.01203,
+      "collection_efficiency": 0.00838777804346584,
+      "overlap_volume_um3": 21.26953125,
+      "effective_volume_um3": 31.81399140006963,
+      "comparison_normalized_cps": 605801611372.9357,
+      "raw_model_sensitivity_nt": 20.305453898604082,
+      "comparison_normalized_sensitivity_nt": 6.131844764417464
     },
     {
       "angle_deg": 0.0,
-      "model_fiber_photons_s": 5344540897.17776,
-      "comparison_normalized_cps": 58607541724.2523,
-      "raw_model_sensitivity_nt": 65.27815413346967,
-      "comparison_normalized_sensitivity_nt": 19.71270918901594
+      "model_fiber_photons_s": 79462828213.11206,
+      "collection_efficiency": 0.012191676846968898,
+      "overlap_volume_um3": 11.71875,
+      "effective_volume_um3": 16.769240467726927,
+      "comparison_normalized_cps": 871379059422.3535,
+      "raw_model_sensitivity_nt": 16.928934713539633,
+      "comparison_normalized_sensitivity_nt": 5.112202869669377
     },
     {
       "angle_deg": 0.8333333333333339,
-      "model_fiber_photons_s": 5862965028.122768,
-      "comparison_normalized_cps": 64292513449.562355,
-      "raw_model_sensitivity_nt": 62.325660520759946,
-      "comparison_normalized_sensitivity_nt": 18.821114615879374
+      "model_fiber_photons_s": 55244280724.01191,
+      "collection_efficiency": 0.008387778043465818,
+      "overlap_volume_um3": 21.26953125,
+      "effective_volume_um3": 31.81399140006985,
+      "comparison_normalized_cps": 605801611372.9343,
+      "raw_model_sensitivity_nt": 20.305453898604103,
+      "comparison_normalized_sensitivity_nt": 6.13184476441747
     },
     {
       "angle_deg": 1.6666666666666679,
-      "model_fiber_photons_s": 5899456420.272231,
-      "comparison_normalized_cps": 64692673319.06677,
-      "raw_model_sensitivity_nt": 62.13241741255315,
-      "comparison_normalized_sensitivity_nt": 18.76275902593617
+      "model_fiber_photons_s": 57185248312.15957,
+      "collection_efficiency": 0.00869179786933417,
+      "overlap_volume_um3": 18.90625,
+      "effective_volume_um3": 29.2438218648411,
+      "comparison_normalized_cps": 627086009995.06,
+      "raw_model_sensitivity_nt": 19.95752129997092,
+      "comparison_normalized_sensitivity_nt": 6.02677601323601
     },
     {
       "angle_deg": 2.5,
-      "model_fiber_photons_s": 5398378915.106676,
-      "comparison_normalized_cps": 59197922440.35575,
-      "raw_model_sensitivity_nt": 64.9514779474267,
-      "comparison_normalized_sensitivity_nt": 19.61405945328237
+      "model_fiber_photons_s": 69509231645.62793,
+      "collection_efficiency": 0.010615260067550038,
+      "overlap_volume_um3": 14.1796875,
+      "effective_volume_um3": 20.587160223409775,
+      "comparison_normalized_cps": 762229211501.2256,
+      "raw_model_sensitivity_nt": 18.10063498967061,
+      "comparison_normalized_sensitivity_nt": 5.466033138105492
     },
     {
       "angle_deg": 3.333333333333334,
-      "model_fiber_photons_s": 5315292186.060356,
-      "comparison_normalized_cps": 58286804154.801,
-      "raw_model_sensitivity_nt": 65.45705038456708,
-      "comparison_normalized_sensitivity_nt": 19.7667323123671
+      "model_fiber_photons_s": 53344694912.69725,
+      "collection_efficiency": 0.008093682677854373,
+      "overlap_volume_um3": 18.90625,
+      "effective_volume_um3": 34.40579734001367,
+      "comparison_normalized_cps": 584970999943.9507,
+      "raw_model_sensitivity_nt": 20.664219993989846,
+      "comparison_normalized_sensitivity_nt": 6.240185016973597
     },
     {
       "angle_deg": 4.166666666666668,
-      "model_fiber_photons_s": 5410510100.456977,
-      "comparison_normalized_cps": 59330951444.20486,
-      "raw_model_sensitivity_nt": 64.87858030559843,
-      "comparison_normalized_sensitivity_nt": 19.592045809774813
+      "model_fiber_photons_s": 58823952127.281425,
+      "collection_efficiency": 0.008952575305669038,
+      "overlap_volume_um3": 18.90625,
+      "effective_volume_um3": 27.122272776748733,
+      "comparison_normalized_cps": 645055823317.8772,
+      "raw_model_sensitivity_nt": 19.677302558972887,
+      "comparison_normalized_sensitivity_nt": 5.942155505442359
     },
     {
       "angle_deg": 5.0,
-      "model_fiber_photons_s": 5210722673.105204,
-      "comparison_normalized_cps": 57140108449.499146,
-      "raw_model_sensitivity_nt": 66.11054780841609,
-      "comparison_normalized_sensitivity_nt": 19.964075586592767
+      "model_fiber_photons_s": 65205072888.086365,
+      "collection_efficiency": 0.009939778483519512,
+      "overlap_volume_um3": 14.1796875,
+      "effective_volume_um3": 21.544690066050762,
+      "comparison_normalized_cps": 715030365272.239,
+      "raw_model_sensitivity_nt": 18.68874187039574,
+      "comparison_normalized_sensitivity_nt": 5.643629763893808
     },
     {
       "angle_deg": 5.833333333333334,
-      "model_fiber_photons_s": 4971353347.527161,
-      "comparison_normalized_cps": 54515215496.8174,
-      "raw_model_sensitivity_nt": 67.68330905070259,
-      "comparison_normalized_sensitivity_nt": 20.439018320567122
+      "model_fiber_photons_s": 51274396006.37238,
+      "collection_efficiency": 0.00777671062784118,
+      "overlap_volume_um3": 25.99609375,
+      "effective_volume_um3": 36.68894830022945,
+      "comparison_normalized_cps": 562268370874.6921,
+      "raw_model_sensitivity_nt": 21.077672777957943,
+      "comparison_normalized_sensitivity_nt": 6.365039565971534
     },
     {
       "angle_deg": 6.666666666666668,
-      "model_fiber_photons_s": 4811097636.308995,
-      "comparison_normalized_cps": 52757872169.77354,
-      "raw_model_sensitivity_nt": 68.80110081474626,
-      "comparison_normalized_sensitivity_nt": 20.776569286444875
+      "model_fiber_photons_s": 58909146274.26732,
+      "collection_efficiency": 0.008971747712185554,
+      "overlap_volume_um3": 18.90625,
+      "effective_volume_um3": 25.9282807907033,
+      "comparison_normalized_cps": 645990051275.0015,
+      "raw_model_sensitivity_nt": 19.662966129524765,
+      "comparison_normalized_sensitivity_nt": 5.937826187797411
     },
     {
       "angle_deg": 7.5,
-      "model_fiber_photons_s": 4486231931.016115,
-      "comparison_normalized_cps": 49195437015.09352,
-      "raw_model_sensitivity_nt": 71.24836855436325,
-      "comparison_normalized_sensitivity_nt": 21.51559565597261
+      "model_fiber_photons_s": 58929090046.629715,
+      "collection_efficiency": 0.00896536982153402,
+      "overlap_volume_um3": 16.54296875,
+      "effective_volume_um3": 23.462134060112042,
+      "comparison_normalized_cps": 646208752093.9036,
+      "raw_model_sensitivity_nt": 19.659248860678364,
+      "comparison_normalized_sensitivity_nt": 5.936703646256228
     },
     {
       "angle_deg": 8.333333333333336,
-      "model_fiber_photons_s": 3681232044.10714,
-      "comparison_normalized_cps": 40367912749.17397,
-      "raw_model_sensitivity_nt": 78.65356474241682,
-      "comparison_normalized_sensitivity_nt": 23.751818185246975
+      "model_fiber_photons_s": 48706263387.346306,
+      "collection_efficiency": 0.007386494203908203,
+      "overlap_volume_um3": 28.359375,
+      "effective_volume_um3": 38.35654104482451,
+      "comparison_normalized_cps": 534106561933.8225,
+      "raw_model_sensitivity_nt": 21.626640151810715,
+      "comparison_normalized_sensitivity_nt": 6.530816836157379
     },
     {
       "angle_deg": 9.166666666666668,
-      "model_fiber_photons_s": 3836198859.7232127,
-      "comparison_normalized_cps": 42067258733.57638,
-      "raw_model_sensitivity_nt": 77.04778931243669,
-      "comparison_normalized_sensitivity_nt": 23.26690582070088
+      "model_fiber_photons_s": 56302488373.250916,
+      "collection_efficiency": 0.008570450780119657,
+      "overlap_volume_um3": 16.54296875,
+      "effective_volume_um3": 25.871290064755513,
+      "comparison_normalized_cps": 617405779092.6439,
+      "raw_model_sensitivity_nt": 20.113108547724014,
+      "comparison_normalized_sensitivity_nt": 6.07376027939962
     },
     {
       "angle_deg": 10.0,
-      "model_fiber_photons_s": 3507904831.8105035,
-      "comparison_normalized_cps": 38467229038.06463,
-      "raw_model_sensitivity_nt": 80.57260216465217,
-      "comparison_normalized_sensitivity_nt": 24.331329464778825
+      "model_fiber_photons_s": 49910042046.58152,
+      "collection_efficiency": 0.007576284409477796,
+      "overlap_volume_um3": 22.5,
+      "effective_volume_um3": 30.77452962817545,
+      "comparison_normalized_cps": 547307042453.1403,
+      "raw_model_sensitivity_nt": 21.36275966946903,
+      "comparison_normalized_sensitivity_nt": 6.451130158767219
     }
   ],
   "given": {
     "tilt_deg": 0.0,
-    "model_fiber_photons_s": 4088857128.1102095,
-    "comparison_normalized_cps": 44837876508.11481,
-    "raw_model_sensitivity_nt": 74.63134525649886,
-    "comparison_normalized_sensitivity_nt": 22.537187592933083,
-    "resolution_um": 0.7656108534579873
+    "model_fiber_photons_s": 86281554186.094,
+    "comparison_normalized_cps": 946152323329.6069,
+    "raw_model_sensitivity_nt": 16.246257664260153,
+    "comparison_normalized_sensitivity_nt": 4.90604792670107,
+    "resolution_um": 0.6371904395825476
   },
   "tilt_axis": "diamond plane rotated about fiber y-axis through z=0"
 }

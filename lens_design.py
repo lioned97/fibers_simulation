@@ -21,15 +21,19 @@ from scipy.optimize import differential_evolution
 
 from physics import diamond_sellmeier, nv_emission_spectrum, trapz
 from paper_figures import (
-    E_PHOT_RED, I_SAT, MCF_IPS_N, MCF_MFD, P_GREEN_MW,
-    PPM, RHO, R_SAT,
+    E_PHOT_RED, I_SAT, MCF_IPS_N, MCF_MFD, MCF_NA, MCF_PITCH_UM, P_GREEN_MW,
+    PPM, RHO, R_SAT, mcf_mode_radius,
 )
 from sensitivity import MEASURED, linewidth_from_resolution, calibrated_sensitivity
 
 N_AIR = 1.0
-CORE_R = 35.0
+CORE_R = MCF_PITCH_UM
+# Mode radius at the collection band, not the datasheet's 1550 nm figure -- see
+# paper_figures.mcf_mode_radius.  One value serves the whole model because the
+# fiber is above cutoff at both 532 nm and 650-800 nm, where the guided field
+# fills the core and the mode radius stops depending on wavelength.
 W_MODE = MCF_MFD / 2.0
-MCF_FULL_NA = float(os.environ.get("MCF_FULL_NA", "0.22"))
+MCF_FULL_NA = float(os.environ.get("MCF_FULL_NA", str(MCF_NA)))
 if not 0.0 < MCF_FULL_NA < MCF_IPS_N:
     raise ValueError("MCF_FULL_NA must be between 0 and the IP-S index")
 PRINT_X_UM = PRINT_Y_UM = PRINT_Z_UM = 300.0
@@ -853,6 +857,15 @@ PROXY_RED_LAM = np.array([RED_DESIGN_NM])   # band centre, from the spectrum
 PROXY_RED_W = np.array([1.0])
 PROXY_GRID_N = 41
 PROXY_RAY_GRID = 17
+# The transverse mesh the search scores on.  It used to be 81 for the full stage
+# and 161 for the final re-score, which cannot resolve the sub-2-um spots the
+# search selects for: at 81 the same candidate reads 188 nT and at 241 it reads
+# 195, and the ranking among near-tied families moves with the mesh.  Ray
+# tracing dominates the cost -- 0.86 s at 81 against 0.98 s at 241 -- so the
+# coarse grid was buying almost nothing.  The proxy stage stays at 41: it only
+# has to throw away bad regions, and it is where the iteration count lives.
+SEARCH_GRID_N = 241
+FINAL_GRID_N = 321
 
 
 def evaluate_design(central, side, grid_n=121, tilt_deg=0.0, depths=DEPTHS,
@@ -1224,7 +1237,7 @@ def _search_objective_cached(parameters, central_family, side_family, stage):
         central, side = surfaces
         if stage == "full":
             result = evaluate_design(
-                central, side, grid_n=81, depths=SEARCH_DEPTHS,
+                central, side, grid_n=SEARCH_GRID_N, depths=SEARCH_DEPTHS,
                 red_lam=SEARCH_RED_LAM, red_w=SEARCH_RED_W, ray_grid=31)
         else:
             result = evaluate_design(
@@ -1310,9 +1323,14 @@ def _search_signature(families, proxy_maxiter, full_maxiter, popsize, restarts):
             "restarts": int(restarts),
             "geometry_bounds": [list(b) for b in SEARCH_GEOMETRY_BOUNDS],
             "aperture_bounds": [list(b) for b in SEARCH_APERTURE_BOUNDS],
+            # W_MODE and the scoring grids belong here as much as the NA does.
+            # The fiber changed from MCF-007_2 to MCF-007_3 and only the NA
+            # happened to be in this list, so a checkpoint from the old mode
+            # field would have been silently resumed under the new one.
             "constants": [APERTURE_MARGIN, EXPOSURE_MIN, CLEARANCE_TOL,
                           MAX_SURFACE_SLOPE, MIN_POLYMER_UM,
-                          FIELD_LIMIT_QUANTUM_UM, MCF_FULL_NA]}
+                          FIELD_LIMIT_QUANTUM_UM, MCF_FULL_NA, W_MODE,
+                          PROXY_GRID_N, SEARCH_GRID_N, FINAL_GRID_N]}
 
 
 def _save_checkpoint(path, signature, done, finalists, method_results):
@@ -1504,7 +1522,7 @@ def search_design(families=("quadratic", "asphere", "biconic", "freeform"),
                 continue
             central, side = surfaces
             result = evaluate_design(
-                central, side, grid_n=81, depths=SEARCH_DEPTHS,
+                central, side, grid_n=SEARCH_GRID_N, depths=SEARCH_DEPTHS,
                 red_lam=SEARCH_RED_LAM, red_w=SEARCH_RED_W, ray_grid=31)
             label = f"{central_family} + {side_family}"
             method_results[label] = {k: result[k] for k in
@@ -1552,7 +1570,7 @@ def search_design(families=("quadratic", "asphere", "biconic", "freeform"),
     # the surface dicts on a tie, which raises.
     for merit, label, central, side in sorted(
             finalists, key=lambda row: row[0])[:rescore_count]:
-        fine = evaluate_design(central, side, grid_n=161)
+        fine = evaluate_design(central, side, grid_n=FINAL_GRID_N)
         method_results[label]["final_grid_sensitivity_nt"] = float(
             fine["raw_model_sensitivity_nt"])
         print(f"  re-scored {label}: {merit:.6g} -> "

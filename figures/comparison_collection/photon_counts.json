@@ -1,0 +1,51 @@
+{
+  "green_power_mw": 10.0,
+  "definition": "created = integral of RHO*R_exc over the 80-90 um layer (photons/s into 4pi, saturated in the green intensity); collected = the same integral weighted by collection probability; resolution = second-moment FWHM of the collected signal",
+  "caveat": "SM and MM come from a different tracer; only the two MCF tips are a like-for-like ratio",
+  "rows": [
+    {
+      "collection_efficiency": 4.093804822741799e-05,
+      "created_photons_s": 6985535832348.738,
+      "collected_photons_s": 285974202.79904914,
+      "green_spot_diameter_um": 9.321060741059153,
+      "resolution_um": 3.1525042949574846,
+      "label": "SM bare fiber",
+      "note": "characterisation model",
+      "effective_volume_um3": NaN,
+      "vs_as_built": 1.335565511137492
+    },
+    {
+      "collection_efficiency": 0.0009615818307735605,
+      "created_photons_s": 7240333943590.293,
+      "collected_photons_s": 6962173568.889507,
+      "green_spot_diameter_um": 65.48000541118576,
+      "resolution_um": 30.57628780529804,
+      "label": "MM bare fiber",
+      "note": "characterisation model",
+      "effective_volume_um3": NaN,
+      "vs_as_built": 32.51495697916417
+    },
+    {
+      "label": "MCF as-built (50 um gap)",
+      "note": null,
+      "created_photons_s": 6964235283225.11,
+      "collected_photons_s": 214122183.01106536,
+      "collection_efficiency": 3.0745971998795855e-05,
+      "green_spot_diameter_um": 76.5596560107079,
+      "resolution_um": 26.897625402392272,
+      "effective_volume_um3": 4190.054095886919,
+      "vs_as_built": 1.0
+    },
+    {
+      "label": "MCF new design (asphere + biconic)",
+      "note": null,
+      "created_photons_s": 6479254430164.055,
+      "collected_photons_s": 84903222152.67307,
+      "collection_efficiency": 0.013103856789047767,
+      "green_spot_diameter_um": 3.8219082974001455,
+      "resolution_um": 0.8471522395350503,
+      "effective_volume_um3": 14.455114667977524,
+      "vs_as_built": 396.5176375410177
+    }
+  ]
+}

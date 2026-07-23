@@ -112,7 +112,59 @@ MCF_GREEN_LENS_HEIGHT = 194.041       # spreadsheet, central-lens IP-S thickness
 MCF_DESIGN_N_DIA = 2.4093             # spreadsheet, diamond index at 650 nm
 MCF_IPS_N = 1.52
 MCF_SIO2_N = 1.4565
-MCF_MFD = 10.0                         # every MCF core, including the central core (um)
+# --- MCF-007_3 datasheet.  The fiber in hand; the model previously carried
+# MCF-007_2 (MFD 10 um, NA 0.22, 37 um pitch), which is a different part.
+MCF_NA = 0.21                          # nominal
+MCF_DATASHEET_MFD = 6.1                # 5.7-6.5 um, quoted at 1550 nm
+MCF_DATASHEET_LAM_NM = 1550.0
+MCF_PITCH_UM = 35.0                    # core-to-core, hexagonal, 125 um cladding
+
+
+def _marcuse_ratio(v):
+    """Gaussian mode radius over core radius for a step-index fiber."""
+    return 0.65 + 1.619*v**-1.5 + 2.879*v**-6
+
+
+def _mcf_core_radius():
+    """Core radius implied by the datasheet MFD and NA at 1550 nm.
+
+    MCF-007_3 quotes no core diameter, but the mode field and the NA fix it.
+    Mode field versus core radius has a minimum, so two radii reproduce a 6.1 um
+    field; they are told apart by the cutoff.  The larger root puts the cutoff
+    at 1426 nm, just under the quoted 1520-1650 nm window, which is where a real
+    single-mode fiber is designed to sit.  The smaller root would put it near
+    930 nm, leaving the mode barely confined at 1550.  So: the largest root.
+    """
+    a = np.linspace(0.5, 12.0, 4001)
+    v = 2*np.pi*a*MCF_NA/(MCF_DATASHEET_LAM_NM*1e-3)
+    residual = 2*a*_marcuse_ratio(v) - MCF_DATASHEET_MFD
+    crossings = np.flatnonzero(np.sign(residual[:-1]) != np.sign(residual[1:]))
+    if not len(crossings):
+        raise ValueError("no core radius reproduces the datasheet mode field")
+    i = crossings[-1]
+    lo, hi = a[i], a[i+1]
+    return float(lo + (hi-lo)*abs(residual[i])/abs(residual[i]-residual[i+1]))
+
+
+MCF_CORE_R = _mcf_core_radius()
+
+
+def mcf_mode_radius(lam_nm):
+    """Gaussian 1/e^2 mode radius of one MCF core at ``lam_nm``.
+
+    The datasheet quotes the mode field at 1550 nm only.  Carrying that number
+    to 532-800 nm unchanged would be wrong by a factor of about 2.5: V = 1.7 at
+    1550 nm but 3.8 at 700 nm and 5.0 at 532 nm, so the fiber is single mode
+    where it is specified and few-moded where we use it.  Below cutoff the
+    Marcuse fit applies; above it the guided field fills the core, so the core
+    radius is the honest source size and Marcuse (fitted for V < 2.4) is not
+    extrapolated into a regime it never described.
+    """
+    v = 2*np.pi*MCF_CORE_R*MCF_NA/(float(lam_nm)*1e-3)
+    return MCF_CORE_R*(_marcuse_ratio(v) if v < 2.405 else 1.0)
+
+
+MCF_MFD = 2.0*mcf_mode_radius(LAM_RED)  # at the collection band, not at 1550
 MCF_MODE_W = MCF_MFD / 2.0             # Gaussian 1/e^2 mode radius (um)
 MCF_SIDE_TIP_OFFSET = MCF_GREEN_LENS_HEIGHT - MCF_RED_LENS_HEIGHT  # 35.225 um
 # Quadratic fit to the STL outer surface in each lens's radial/tangential frame.
@@ -1035,7 +1087,7 @@ if __name__ == "__main__":
     print(f"Same-gap pairwise values: {comparison_csv}")
     print(f"\n{EXPERIMENT_NOTE}")
     print("\nNotes: fixed-aim MCF uses the supplied STL/GWL geometry: 17.5 um side-lens radius,"
-          "\n35.225 um central-to-side tip offset, IP-S n=1.52 and 10 um MFD; re-aimed MCF"
+          f"\n35.225 um central-to-side tip offset, IP-S n=1.52 and {MCF_MFD:.1f} um in-band MFD (MCF-007_3); re-aimed MCF"
           "\nrecalculates the side-core boresights at every gap for the 85 um NV layer."
           "\nA50 is an on-axis circular area on the NV layer containing 50% of the"
           "\nexcitation x collection weighted ensemble signal. Single-NV rates are reported"
